@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Expects caller to enable strict mode (set -euo pipefail).
 
 setup_colors() {
   if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
@@ -35,7 +36,7 @@ else
 fi
 
 strip_ansi_text() {
-  python3 -c 'import re, sys; text = sys.stdin.read(); text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", text); text = text.replace("\r", ""); sys.stdout.write(text)' 2>/dev/null
+  python3 -c 'import re, sys; text = sys.stdin.read(); text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", text); text = text.replace("\r", ""); sys.stdout.write(text)'
 }
 
 append_log() {
@@ -63,6 +64,16 @@ log() {
   append_log "\n◆ $1"
 }
 
+phase() {
+  local current="$1"
+  local total="$2"
+  local message="$3"
+  printf '\n%s[%s/%s]%s %s%s%s\n' \
+    "$COLOR_MAGENTA" "$current" "$total" "$COLOR_RESET" \
+    "$COLOR_BOLD" "$message" "$COLOR_RESET"
+  append_log "[$current/$total] $message"
+}
+
 warn() {
   printf '%sWARN%s %s\n' "$COLOR_YELLOW" "$COLOR_RESET" "$1" >&2
   append_log "WARN $1"
@@ -84,11 +95,15 @@ draw_spinner_until_done() {
   local message="$2"
   local frames=("◰" "◳" "◲" "◱")
   local i=0
+  local start_ts elapsed
 
-  printf '  %s%s%s %s' "$COLOR_MAGENTA" "${frames[0]}" "$COLOR_RESET" "$message" > "$UI_OUT"
+  start_ts="$(date +%s)"
+
+  printf '  %s%s%s %s (0s)' "$COLOR_MAGENTA" "${frames[0]}" "$COLOR_RESET" "$message" > "$UI_OUT"
   while kill -0 "$pid" 2>/dev/null; do
     i=$(( (i + 1) % ${#frames[@]} ))
-    printf '\r  %s%s%s %s' "$COLOR_MAGENTA" "${frames[$i]}" "$COLOR_RESET" "$message" > "$UI_OUT"
+    elapsed=$(( $(date +%s) - start_ts ))
+    printf '\r  %s%s%s %s (%ss)' "$COLOR_MAGENTA" "${frames[$i]}" "$COLOR_RESET" "$message" "$elapsed" > "$UI_OUT"
     sleep 0.12
   done
 }
@@ -96,10 +111,11 @@ draw_spinner_until_done() {
 finish_spinner() {
   local exit_code="$1"
   local message="$2"
+  local elapsed="${3:-}"
   if [[ "$exit_code" -eq 0 ]]; then
-    printf '\r  %s✓%s %s\n' "$COLOR_GREEN" "$COLOR_RESET" "$message" > "$UI_OUT"
+    printf '\r  %s✓%s %s%s\n' "$COLOR_GREEN" "$COLOR_RESET" "$message" "${elapsed:+ (${elapsed}s)}" > "$UI_OUT"
   else
-    printf '\r  %s✗%s %s\n' "$COLOR_RED" "$COLOR_RESET" "$message" > "$UI_OUT"
+    printf '\r  %s✗%s %s%s\n' "$COLOR_RED" "$COLOR_RESET" "$message" "${elapsed:+ (${elapsed}s)}" > "$UI_OUT"
   fi
 }
 
@@ -142,7 +158,7 @@ append_unique() {
   local value="$1"
   shift
   local -n target_ref=$1
-  if ! contains "$value" "${target_ref[@]}"; then
+  if ! contains "$value" "${target_ref[@]+${target_ref[@]}}"; then
     target_ref+=("$value")
   fi
 }
@@ -167,10 +183,10 @@ prompt_csv() {
   local default_value="${2:-}"
   local answer
   if [[ -n "$default_value" ]]; then
-    read -r -p "$prompt [$default_value]: " answer
+    read -r -p "$prompt [$default_value]: " answer </dev/tty
     answer="${answer:-$default_value}"
   else
-    read -r -p "$prompt: " answer
+    read -r -p "$prompt: " answer </dev/tty
   fi
   printf '%s' "$answer"
 }
@@ -194,8 +210,74 @@ ensure_log_file() {
   fi
 
   mkdir -p "$(dirname "$LOG_FILE")"
-  : > "$LOG_FILE"
+  if [[ -f "$LOG_FILE" ]]; then
+    warn "Overwriting existing log file: $LOG_FILE"
+  fi
+  printf '=== setup-agentic-tools session started %s ===\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$LOG_FILE"
   note "$(format_label "Log file:") $(format_value "$LOG_FILE")"
+}
+
+cleanup_spinner_line() {
+  printf '\n' > "$UI_OUT"
+}
+
+cleanup_run_cmd() {
+  local tmp_file="$1"
+  local cmd_pid="${2:-}"
+  cleanup_spinner_line
+  if [[ -n "$cmd_pid" ]]; then
+    kill "$cmd_pid" 2>/dev/null || true
+  fi
+  rm -f "$tmp_file"
+}
+
+command_message() {
+  local -a cmd=("$@")
+  local i token
+  for ((i = 0; i < ${#cmd[@]}; i++)); do
+    token="${cmd[$i]}"
+    case "$token" in
+      npx)
+        for ((i += 1; i < ${#cmd[@]}; i++)); do
+          token="${cmd[$i]}"
+          [[ "$token" == -* ]] && continue
+          if [[ "$token" == "skills" ]]; then
+            printf 'Installing skill via npx'
+            return 0
+          fi
+          break
+        done
+        printf 'Running npx command'
+        return 0
+        ;;
+      mcpm)
+        for ((i += 1; i < ${#cmd[@]}; i++)); do
+          token="${cmd[$i]}"
+          [[ "$token" == -* ]] && continue
+          case "$token" in
+            install) printf 'Installing MCPM server'; return 0 ;;
+            new) printf 'Creating MCPM server'; return 0 ;;
+            edit) printf 'Updating MCPM server'; return 0 ;;
+            client) printf 'Updating MCPM client'; return 0 ;;
+            run) printf 'Running MCPM server'; return 0 ;;
+            ls) printf 'Listing MCPM servers'; return 0 ;;
+          esac
+          break
+        done
+        printf 'Running MCPM command'
+        return 0
+        ;;
+      opencode)
+        printf 'Checking OpenCode MCP configuration'
+        return 0
+        ;;
+      claude)
+        printf 'Checking Claude MCP configuration'
+        return 0
+        ;;
+    esac
+  done
+  printf 'Working...'
 }
 
 run_cmd() {
@@ -225,21 +307,23 @@ run_cmd() {
 
   local tmp_file
   tmp_file="$(mktemp)"
-  local message="Working..."
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    message="${cmd[0]}"
-    if [[ ${#cmd[@]} -gt 1 ]]; then
-      message+=" ${cmd[1]}"
-    fi
-  fi
+  local message
+  message="$(command_message "${cmd[@]}")"
+  local cmd_pid=""
+  local start_ts elapsed
+  start_ts="$(date +%s)"
+
+  trap 'cleanup_run_cmd "$tmp_file" "$cmd_pid"; trap - INT TERM; exit 130' INT TERM
 
   append_log "RUN: $(printf '%q ' "${cmd[@]}")"
   "${cmd[@]}" >"$tmp_file" 2>&1 &
-  local cmd_pid=$!
+  cmd_pid=$!
   draw_spinner_until_done "$cmd_pid" "$message"
   wait "$cmd_pid"
   local exit_code=$?
-  finish_spinner "$exit_code" "$message"
+  elapsed=$(( $(date +%s) - start_ts ))
+  finish_spinner "$exit_code" "$message" "$elapsed"
+  trap - INT TERM
 
   if [[ "$exit_code" -eq 0 ]]; then
     append_log "OK: $(printf '%q ' "${cmd[@]}")"
@@ -267,6 +351,7 @@ capture_cmd() {
       note "[dry-run] command not executed"
     fi
     append_log "DRY-RUN: $(printf '%q ' "${cmd[@]}")"
+    printf '[dry-run output]\n'
     return 0
   fi
   local output

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Expects caller to enable strict mode (set -euo pipefail).
 
 KNOWN_TOOLS=(
   "opencode"
@@ -122,32 +123,6 @@ collect_skill_agents() {
   done
 }
 
-skill_global_dir_for_agent() {
-  local agent="$1"
-  case "$agent" in
-    opencode) printf '%s/.config/opencode/skills' "$HOME" ;;
-    claude-code) printf '%s/.claude/skills' "$HOME" ;;
-    cursor) printf '%s/.cursor/skills' "$HOME" ;;
-    windsurf) printf '%s/.codeium/windsurf/skills' "$HOME" ;;
-    codex) printf '%s/.codex/skills' "$HOME" ;;
-    github-copilot) printf '%s/.copilot/skills' "$HOME" ;;
-    cline) printf '%s/.agents/skills' "$HOME" ;;
-    continue) printf '%s/.continue/skills' "$HOME" ;;
-    goose) printf '%s/.config/goose/skills' "$HOME" ;;
-    roo) printf '%s/.roo/skills' "$HOME" ;;
-    gemini-cli) printf '%s/.gemini/skills' "$HOME" ;;
-    *) return 1 ;;
-  esac
-}
-
-tool_supports_agents_skill_dir() {
-  local tool="$1"
-  case "$tool" in
-    opencode|codex|github-copilot|cline|cursor|gemini-cli) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 tool_skill_static_paths() {
   local tool="$1"
   case "$tool" in
@@ -203,10 +178,7 @@ tool_has_mcp_cli_check() {
 }
 
 tool_has_native_skills_shell_check() {
-  local tool="$1"
-  case "$tool" in
-    *) return 1 ;;
-  esac
+  return 1
 }
 
 tool_native_skills_check_hint() {
@@ -266,9 +238,9 @@ EOF
 )"
         ;;
       cline)
-        note "$(cat <<'EOF'
+        note "$(cat <<EOF
 - cline:
-  1. Verify the skill exists in ~/.agents/skills/test-skill/SKILL.md.
+  1. Verify the skill exists in ~/.agents/skills/${SKILL_NAME}/SKILL.md.
   2. Inspect ~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json.
   3. Open Cline and run a prompt that explicitly says to use context7.
   4. Run another prompt that explicitly invokes or depends on the installed skill.

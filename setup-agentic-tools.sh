@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+VERSION="1.1.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=setup-agentic-tools/lib/common.sh
@@ -38,6 +39,8 @@ Usage: $(basename "$0") [options]
 Installs the LinkSoft test skill via npx skills, installs/configures Context7,
 then runs static and smoke verification where supported.
 
+Version: $VERSION
+
 Options:
   --tools CSV              Final tool ids to configure
   --extra-tools CSV        Additional tool ids to merge with detected tools
@@ -49,7 +52,7 @@ Options:
   --skip-verify            Skip post-install verification
   --non-interactive        Do not prompt the user
   -v, --verbose            Enable detailed command logging
-  --dry-run                Print actions without executing them
+  --dry-run                Print actions without executing them (implies non-interactive preview)
   -h, --help               Show this help
 
 Known tool ids:
@@ -121,10 +124,17 @@ parse_args() {
 
 main() {
   parse_args "$@"
+  if (( DRY_RUN != 0 && NON_INTERACTIVE == 0 )); then
+    NON_INTERACTIVE=1
+  fi
   ensure_log_file
+  note "$(format_label "Version:") $(format_value "$VERSION")"
+  if (( DRY_RUN != 0 )); then
+    note "$(format_label "Mode:") $(format_value "dry-run (non-interactive preview)")"
+  fi
   ensure_prereqs
 
-  printf '\n%s%sAgentic Tools Setup%s\n' "$COLOR_BOLD" "$COLOR_BLUE" "$COLOR_RESET"
+  printf '\n%s%sAgentic Tools Setup v%s%s\n' "$COLOR_BOLD" "$COLOR_BLUE" "$VERSION" "$COLOR_RESET"
   section_divider
 
   debug_section "Environment"
@@ -161,12 +171,26 @@ main() {
   while true; do
     local additional_csv="$ADDITIONAL_TOOLS_CSV"
     local skipped_manual_selection=0
+    phase 1 5 "Selecting tools"
     if (( NON_INTERACTIVE == 0 )) && [[ -z "$additional_csv" ]]; then
       additional_csv="$(prompt_csv "Enter any additional tool ids to configure (comma-separated, or blank for none)")"
     fi
 
     local -a additional_tools=()
     parse_csv_into_array "$additional_csv" additional_tools
+
+    local -a invalid_additional_tools=()
+    local tool
+    for tool in "${additional_tools[@]}"; do
+      if ! is_known_tool "$tool"; then
+        invalid_additional_tools+=("$tool")
+      fi
+    done
+
+    if ((${#invalid_additional_tools[@]})); then
+      warn "The following tool ids are not recognised and will be skipped: $(join_by ', ' "${invalid_additional_tools[@]}")"
+      note "$(format_label "Known tool ids:") $(join_by ', ' "${KNOWN_TOOLS[@]}")"
+    fi
 
     local -a merged_tools=("${detected_tools[@]}")
     merge_known_tools merged_tools "${additional_tools[@]}"
@@ -206,7 +230,11 @@ main() {
     fi
 
     local confirm_install
-    read -r -p "Do you want to install into $(join_by ', ' "${validated_tools[@]}")? [y/N]: " confirm_install
+    printf 'Tools to configure:\n' > /dev/tty
+    for tool in "${validated_tools[@]}"; do
+      printf '  • %s\n' "$tool" > /dev/tty
+    done
+    read -r -p "Proceed with installation? [y/N]: " confirm_install </dev/tty
     case "$confirm_install" in
       y|Y|yes|YES)
         break
@@ -222,16 +250,19 @@ main() {
 
   local api_key="$CONTEXT7_API_KEY_INPUT"
   if (( NON_INTERACTIVE == 0 )) && [[ -z "$api_key" ]]; then
-    read -r -p "Optional Context7 API key (press Enter to skip): " api_key
+    read -r -s -p "Optional Context7 API key (press Enter to skip): " api_key </dev/tty
+    printf '\n' > /dev/tty
   fi
 
   if (( SKIP_SKILLS == 0 )); then
+    phase 2 5 "Installing skills"
     install_skill "${validated_tools[@]}"
   else
     log "Skipping skills installation"
   fi
 
   if (( SKIP_MCP == 0 )); then
+    phase 3 5 "Installing and wiring MCP"
     install_context7_server "$api_key"
     wire_context7_to_tools "${validated_tools[@]}"
   else
@@ -239,11 +270,13 @@ main() {
   fi
 
   if (( SKIP_VERIFY == 0 )); then
+    phase 4 5 "Running verification"
     run_verification "${validated_tools[@]}"
   else
     log "Skipping verification"
   fi
 
+  phase 5 5 "Printing manual follow-up steps"
   print_manual_verification_instructions "${validated_tools[@]}"
 
   log "Done"

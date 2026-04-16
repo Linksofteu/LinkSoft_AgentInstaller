@@ -26,10 +26,11 @@ When run, it will:
 1. detect supported tools already present on the machine
 2. let you add or choose the tools you want to configure
 3. install the LinkSoft test skill via `npx skills`
-4. install the `context7` MCP server in `mcpm`
-5. wire Context7 into each selected tool using the tool's supported config path or MCPM client integration
-6. run verification checks unless skipped
-7. print manual follow-up verification steps for the selected tools
+4. check whether `openspec` is installed and, if missing, offer to install it globally via `npm`
+5. install the `context7` MCP server in `mcpm`
+6. wire Context7 into each selected tool using the tool's supported config path or MCPM client integration
+7. run verification checks unless skipped
+8. print manual follow-up verification steps for the selected tools
 
 ## Current defaults
 
@@ -45,11 +46,44 @@ Before running the installer, make sure these are available:
 - `bash`
 - `python3`
 - `npx` if you are installing skills
+- `npm` if you want the installer to add `openspec` for you when it is missing
 - `mcpm` if you are installing or wiring MCP
 
 The script will fail early if a required dependency is missing for the steps you did not skip.
 
 ## Usage
+
+### One-line run
+
+If you want to run the tool directly on a user machine without cloning the repository first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Linksofteu/LinkSoft_AgentInstaller/main/install.sh | bash
+```
+
+The bootstrap script downloads the repository tarball to a temporary directory, unpacks it, and runs `./setup-agentic-tools.sh` from there.
+
+To pass arguments through the one-liner, use `bash -s --`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Linksofteu/LinkSoft_AgentInstaller/main/install.sh | bash -s -- --non-interactive --tools opencode,codex
+```
+
+### Windows PowerShell
+
+To run the tool directly on Windows without cloning the repository first:
+
+```powershell
+irm https://raw.githubusercontent.com/Linksofteu/LinkSoft_AgentInstaller/main/install.ps1 | iex
+```
+
+To pass arguments through the PowerShell bootstrapper:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Linksofteu/LinkSoft_AgentInstaller/main/install.ps1))) --dry-run --non-interactive --tools opencode,vscode
+```
+
+The Windows bootstrap downloads the repository zip to a temporary directory, expands it, and runs `./setup-agentic-tools.ps1` from there.
 
 ### Interactive mode
 
@@ -62,6 +96,7 @@ This mode:
 - detects installed tools
 - prompts for additional tool ids
 - lets you confirm the final tool selection
+- offers to install `openspec` globally via `npm` when it is missing
 - optionally prompts for a Context7 API key
 
 ### Non-interactive mode
@@ -120,6 +155,8 @@ Useful for scripting or repeatable local setup.
 ```bash
 ./setup-agentic-tools.sh --dry-run --tools opencode,codex
 ```
+
+`--dry-run` prints the planned actions without executing them and now behaves as a non-interactive preview.
 
 ### Only install skills
 
