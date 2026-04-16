@@ -1,6 +1,6 @@
 # LinkSoft_AgentInstaller
 
-LinkSoft_AgentInstaller is a Bash-based setup utility for installing and wiring LinkSoft-supported agent skills and MCP integrations across multiple AI coding tools from one place.
+LinkSoft_AgentInstaller is a cross-platform setup utility for installing and wiring LinkSoft-supported agent skills and MCP integrations across multiple AI coding tools from one place. It ships a Bash implementation for Linux and macOS and a self-contained PowerShell port for Windows.
 
 Today, the script focuses on:
 
@@ -41,6 +41,8 @@ When run, it will:
 
 ## Prerequisites
 
+### Linux / macOS
+
 Before running the installer, make sure these are available:
 
 - `bash`
@@ -48,6 +50,21 @@ Before running the installer, make sure these are available:
 - `npx` if you are installing skills
 - `npm` if you want the installer to add `openspec` for you when it is missing
 - `mcpm` if you are installing or wiring MCP
+
+### Windows
+
+Before running the PowerShell installer, make sure these are available:
+
+- **PowerShell 5.1 or later** — ships with Windows 10/11; PowerShell 7+ also works
+- `npx` (via Node.js) if you are installing skills
+- `npm` if you want the installer to add `openspec` for you when it is missing
+- `mcpm` if you are installing or wiring MCP
+
+**Execution policy**: The bootstrap one-liner pipes a remote script into `iex`, so no special execution policy is required for that approach. If you download and run `setup-agentic-tools.ps1` directly, PowerShell's default policy may block it. Allow the script to run with:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
 
 The script will fail early if a required dependency is missing for the steps you did not skip.
 
@@ -71,21 +88,65 @@ curl -fsSL https://raw.githubusercontent.com/Linksofteu/LinkSoft_AgentInstaller/
 
 ### Windows PowerShell
 
+#### One-line run
+
 To run the tool directly on Windows without cloning the repository first:
 
 ```powershell
 irm https://raw.githubusercontent.com/Linksofteu/LinkSoft_AgentInstaller/main/install.ps1 | iex
 ```
 
-To pass arguments through the PowerShell bootstrapper:
+The bootstrap downloads the repository zip to a temporary directory, expands it, and runs `setup-agentic-tools.ps1` from there. It cleans up the temp directory on exit.
+
+To pass arguments through the bootstrapper:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Linksofteu/LinkSoft_AgentInstaller/main/install.ps1))) --dry-run --non-interactive --tools opencode,vscode
 ```
 
-The Windows bootstrap downloads the repository zip to a temporary directory, expands it, and runs `./setup-agentic-tools.ps1` from there.
+#### Direct run (after cloning)
 
-### Interactive mode
+```powershell
+.\setup-agentic-tools.ps1
+```
+
+Or with arguments:
+
+```powershell
+.\setup-agentic-tools.ps1 --non-interactive --tools opencode,cursor,codex
+```
+
+#### Windows PowerShell examples
+
+The PowerShell script accepts the same flags as the Bash version:
+
+```powershell
+# Configure detected tools interactively
+.\setup-agentic-tools.ps1
+
+# Configure a fixed set of tools
+.\setup-agentic-tools.ps1 --non-interactive --tools opencode,cursor,codex
+
+# Add extra tools on top of detected tools
+.\setup-agentic-tools.ps1 --extra-tools vscode,github-copilot-cli
+
+# Preview actions without making changes
+.\setup-agentic-tools.ps1 --dry-run --tools opencode,codex
+
+# Provide a Context7 API key
+.\setup-agentic-tools.ps1 --tools opencode --context7-api-key YOUR_KEY
+
+# Only install skills
+.\setup-agentic-tools.ps1 --skip-mcp --tools opencode,codex
+
+# Only wire MCP and skip skill installation
+.\setup-agentic-tools.ps1 --skip-skills --tools vscode,cursor
+
+# Write the log to a custom path
+.\setup-agentic-tools.ps1 --log-file C:\Temp\installer.log --tools opencode
+```
+
+### Interactive mode (Linux / macOS)
 
 ```bash
 ./setup-agentic-tools.sh
@@ -99,7 +160,7 @@ This mode:
 - offers to install `openspec` globally via `npm` when it is missing
 - optionally prompts for a Context7 API key
 
-### Non-interactive mode
+### Non-interactive mode (Linux / macOS)
 
 ```bash
 ./setup-agentic-tools.sh --non-interactive --tools opencode,codex,vscode
@@ -202,19 +263,79 @@ npx -y skills add Linksofteu/LinkSoft_Skills@test-skill -g -y
 
 The script maps selected tool ids to the correct skills agent target where possible.
 
+### Skill file locations
+
+The table below lists where the installed skill file lands after `npx skills` runs. `~` expands to `$HOME` on Linux/macOS and `%USERPROFILE%` on Windows.
+
+| Tool id | Skill file path |
+|---------|-----------------|
+| `opencode` | `~/.agents/skills/test-skill/SKILL.md` |
+| `codex` | `~/.agents/skills/test-skill/SKILL.md` |
+| `github-copilot-cli` | `~/.agents/skills/test-skill/SKILL.md` |
+| `github-copilot` | `~/.agents/skills/test-skill/SKILL.md` |
+| `cline` | `~/.agents/skills/test-skill/SKILL.md` |
+| `cursor` | `~/.agents/skills/test-skill/SKILL.md` |
+| `gemini-cli` | `~/.agents/skills/test-skill/SKILL.md` |
+| `vscode` | `~/.agents/skills/test-skill/SKILL.md` |
+| `claude-code` | `~/.claude/skills/test-skill/SKILL.md` |
+| `windsurf` | `~/.codeium/windsurf/skills/test-skill/SKILL.md` |
+| `continue` | `~/.continue/skills/test-skill/SKILL.md` |
+| `goose` | `~/.config/goose/skills/test-skill/SKILL.md` |
+| `roo` | `~/.roo/skills/test-skill/SKILL.md` |
+
 ### Context7 MCP wiring
 
 Context7 is installed into MCPM first, then connected to selected tools.
 
-Special handling exists for:
-
-- **OpenCode**: updates `~/.config/opencode/opencode.json`
-- **VS Code**: updates `~/.config/Code/User/mcp.json`
-- **GitHub Copilot CLI**: updates `~/.copilot/mcp-config.json`
-
-Other supported tools are wired through `mcpm client edit` when a matching MCPM client name is defined.
+Special handling exists for three tools that receive direct JSON config writes. All other supported tools are wired through `mcpm client edit`.
 
 For `github-copilot`, MCP wiring is not done directly by this script; use the `vscode` target when configuring Copilot inside VS Code.
+
+#### MCP config file locations
+
+| Tool id | Linux / macOS path | Windows path |
+|---------|-------------------|--------------|
+| `opencode` | `~/.config/opencode/opencode.json` | `%APPDATA%\opencode\opencode.json` |
+| `vscode` | `~/.config/Code/User/mcp.json` | `%APPDATA%\Code\User\mcp.json` |
+| `github-copilot-cli` | `~/.copilot/mcp-config.json` | `%USERPROFILE%\.copilot\mcp-config.json` |
+
+Tools wired via `mcpm client edit` do not have a single config path managed by this script; MCPM writes to its own client config store.
+
+#### MCPM client names
+
+The table below lists the MCPM client name used when wiring via `mcpm client edit`.
+
+| Tool id | MCPM client name |
+|---------|-----------------|
+| `claude-code` | `claude-code` |
+| `cursor` | `cursor` |
+| `windsurf` | `windsurf` |
+| `codex` | `codex-cli` |
+| `cline` | `cline` |
+| `continue` | `continue` |
+| `goose` | `goose-cli` |
+| `roo` | `roo-code` |
+| `gemini-cli` | `gemini-cli` |
+
+### Windows tool detection
+
+On Windows the script checks `%APPDATA%` and `%USERPROFILE%` paths rather than `~/.config` equivalents. The table below shows what each tool id looks for.
+
+| Tool id | Detected when any of these exist |
+|---------|----------------------------------|
+| `opencode` | `%APPDATA%\opencode` directory or `opencode` executable |
+| `claude-code` | `%USERPROFILE%\.claude` directory or `claude` executable |
+| `cursor` | `%USERPROFILE%\.cursor`, `%APPDATA%\Cursor`, or `cursor` executable |
+| `windsurf` | `%USERPROFILE%\.codeium\windsurf`, `%APPDATA%\Codeium\Windsurf`, or `windsurf` executable |
+| `codex` | `%USERPROFILE%\.codex` directory or `codex` executable |
+| `github-copilot-cli` | `copilot` executable or `%USERPROFILE%\.copilot` directory |
+| `github-copilot` | `%APPDATA%\Code\User` directory or `code` executable |
+| `cline` | `%USERPROFILE%\.cline` or `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev` |
+| `continue` | `%USERPROFILE%\.continue` directory |
+| `goose` | `%APPDATA%\goose` directory or `goose` executable |
+| `roo` | `%USERPROFILE%\.roo` directory |
+| `vscode` | `code` executable or `%APPDATA%\Code\User` directory |
+| `gemini-cli` | `%USERPROFILE%\.gemini` directory or `gemini` executable |
 
 ## Verification
 
@@ -229,16 +350,20 @@ After that, it also prints manual verification instructions for each selected to
 
 ## Logging
 
-By default, the script writes a log file to:
+By default, the script writes a log file next to the script itself:
 
 ```text
 ./setup-agentic-tools.log
 ```
 
-You can override it with:
+You can override it:
 
 ```bash
+# Linux / macOS
 ./setup-agentic-tools.sh --log-file /path/to/custom.log
+
+# Windows
+.\setup-agentic-tools.ps1 --log-file C:\Temp\installer.log
 ```
 
 ## Repository layout
@@ -246,7 +371,10 @@ You can override it with:
 ```text
 .
 ├── README.md
-├── setup-agentic-tools.sh
+├── install.sh                          # Linux/macOS bootstrap (curl | bash)
+├── install.ps1                         # Windows bootstrap (irm | iex)
+├── setup-agentic-tools.sh              # Linux/macOS entrypoint
+├── setup-agentic-tools.ps1             # Windows entrypoint (self-contained PS port)
 └── setup-agentic-tools/
     └── lib/
         ├── common.sh
@@ -254,6 +382,8 @@ You can override it with:
         ├── tooling.sh
         └── verify.sh
 ```
+
+`setup-agentic-tools.ps1` is a self-contained PowerShell port of the entire Bash implementation. It does not depend on WSL, Cygwin, or any Unix utilities. Both scripts must be kept in sync manually when new features are added.
 
 ## Notes and limitations
 
