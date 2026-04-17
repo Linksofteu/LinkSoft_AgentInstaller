@@ -4,6 +4,10 @@
 ensure_install_globals() {
   : "${CONTEXT7_SERVER_NAME:?CONTEXT7_SERVER_NAME must be set}"
   : "${CONTEXT7_URL:?CONTEXT7_URL must be set}"
+  : "${FIGMA_SERVER_NAME:?FIGMA_SERVER_NAME must be set}"
+  : "${FIGMA_URL:?FIGMA_URL must be set}"
+  : "${FIGMA_REGISTER_URL:?FIGMA_REGISTER_URL must be set}"
+  : "${FIGMA_OPENCODE_REDIRECT_URI:?FIGMA_OPENCODE_REDIRECT_URI must be set}"
   ((${#SKILL_SOURCES[@]} > 0)) || die "SKILL_SOURCES must not be empty"
   ((${#SKILL_NAMES[@]} > 0)) || die "SKILL_NAMES must not be empty"
   ((${#SKILL_SOURCES[@]} == ${#SKILL_NAMES[@]})) || die "SKILL_SOURCES and SKILL_NAMES must stay in sync"
@@ -93,6 +97,20 @@ install_context7_server() {
   fi
 
   note "No standalone MCP manager is used; supported tools are configured directly"
+}
+
+install_figma_server() {
+  ensure_install_globals
+
+  log "Preparing direct Figma MCP configuration"
+
+  if (( DRY_RUN )); then
+    note "Would configure supported tools with a direct remote MCP entry for '$FIGMA_SERVER_NAME'"
+    note "Would use each tool's native OAuth/browser flow when available"
+    return 0
+  fi
+
+  note "Figma MCP is only wired for tools with a documented native OAuth/browser flow"
 }
 
 write_context7_json_config() {
@@ -316,6 +334,213 @@ with open(path, "w", encoding="utf-8") as f:
 PY
 }
 
+write_figma_opencode_json_config() {
+  local path="$1"
+  local client_id="$2"
+  local client_secret="$3"
+
+  TARGET_PATH="$path" FIGMA_SERVER_NAME="$FIGMA_SERVER_NAME" FIGMA_URL="$FIGMA_URL" FIGMA_CLIENT_ID="$client_id" FIGMA_CLIENT_SECRET="$client_secret" python3 - <<'PY'
+import json
+import os
+import shutil
+import time
+
+
+def strip_jsonc(text: str) -> str:
+    result = []
+    in_string = False
+    string_char = ""
+    escaped = False
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
+                result.append(ch)
+            i += 1
+            continue
+
+        if in_block_comment:
+            if ch == "*" and nxt == "/":
+                in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+
+        if in_string:
+            result.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == string_char:
+                in_string = False
+            i += 1
+            continue
+
+        if ch in ('"', "'"):
+            in_string = True
+            string_char = ch
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "/":
+            in_line_comment = True
+            i += 2
+            continue
+
+        if ch == "/" and nxt == "*":
+            in_block_comment = True
+            i += 2
+            continue
+
+        result.append(ch)
+        i += 1
+
+    cleaned = "".join(result)
+    compact = []
+    in_string = False
+    string_char = ""
+    escaped = False
+    i = 0
+    while i < len(cleaned):
+        ch = cleaned[i]
+        if in_string:
+            compact.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == string_char:
+                in_string = False
+            i += 1
+            continue
+        if ch in ('"', "'"):
+            in_string = True
+            string_char = ch
+            compact.append(ch)
+            i += 1
+            continue
+        if ch == ",":
+            j = i + 1
+            while j < len(cleaned) and cleaned[j] in " \t\r\n":
+                j += 1
+            if j < len(cleaned) and cleaned[j] in "]}":
+                i += 1
+                continue
+        compact.append(ch)
+        i += 1
+    return "".join(compact)
+
+
+path = os.path.expanduser(os.environ["TARGET_PATH"])
+server_name = os.environ["FIGMA_SERVER_NAME"]
+url = os.environ["FIGMA_URL"]
+client_id = os.environ["FIGMA_CLIENT_ID"]
+client_secret = os.environ["FIGMA_CLIENT_SECRET"]
+
+parent = os.path.dirname(path)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+
+data = {}
+if os.path.exists(path):
+    shutil.copy2(path, f"{path}.bak.{time.time_ns()}")
+    with open(path, "r", encoding="utf-8") as f:
+        raw = strip_jsonc(f.read()).strip()
+    if raw:
+        data = json.loads(raw)
+
+data.setdefault("$schema", "https://opencode.ai/config.json")
+data.setdefault("mcp", {})
+data["mcp"][server_name] = {
+    "enabled": True,
+    "type": "remote",
+    "url": url,
+    "oauth": {
+        "clientId": client_id,
+        "clientSecret": client_secret,
+    },
+}
+
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+}
+
+register_figma_opencode_oauth_client() {
+  ensure_install_globals
+
+  local payload response client_id client_secret
+  payload=$(printf '{"client_name":"LinkSoft Agent Installer (opencode)","redirect_uris":["%s"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}' "$FIGMA_OPENCODE_REDIRECT_URI")
+
+  response="$(capture_cmd curl -fsS -X POST "$FIGMA_REGISTER_URL" -H "Content-Type: application/json" -d "$payload")" || die "Failed to register Figma OAuth client for OpenCode"
+
+  client_id="$(printf '%s' "$response" | sed -n 's/.*"client_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  client_secret="$(printf '%s' "$response" | sed -n 's/.*"client_secret"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+
+  [[ -n "$client_id" ]] || die "Figma OAuth registration response did not include client_id"
+  [[ -n "$client_secret" ]] || die "Figma OAuth registration response did not include client_secret"
+
+  FIGMA_CLIENT_ID_INPUT="$client_id"
+  FIGMA_CLIENT_SECRET_INPUT="$client_secret"
+
+  note "Registered a Figma OAuth client for OpenCode using callback $FIGMA_OPENCODE_REDIRECT_URI"
+}
+
+ensure_figma_opencode_credentials() {
+  ensure_install_globals
+  if [[ -n "${FIGMA_CLIENT_ID_INPUT:-}" && -n "${FIGMA_CLIENT_SECRET_INPUT:-}" ]]; then
+    return 0
+  fi
+
+  if ! has_cmd curl; then
+    die "curl is required to register the Figma OAuth client for OpenCode"
+  fi
+
+  register_figma_opencode_oauth_client
+}
+
+configure_figma_opencode() {
+  ensure_install_globals
+  local client_id="$1"
+  local client_secret="$2"
+
+  log "Configuring OpenCode with direct Figma MCP"
+  if (( DRY_RUN )); then
+    note "Would update ~/.config/opencode/opencode.json with a Figma remote MCP entry"
+    return 0
+  fi
+
+  write_figma_opencode_json_config "~/.config/opencode/opencode.json" "$client_id" "$client_secret" || die "Failed to configure OpenCode for Figma MCP"
+}
+
+authenticate_figma_opencode() {
+  ensure_install_globals
+  if (( DRY_RUN )); then
+    note "Would run: opencode mcp auth $FIGMA_SERVER_NAME"
+    return 0
+  fi
+
+  if ! has_cmd opencode; then
+    warn "OpenCode executable not found; skipping automatic Figma OAuth login"
+    return 0
+  fi
+
+  capture_cmd opencode mcp logout "$FIGMA_SERVER_NAME" >/dev/null || true
+  note "Starting native OpenCode OAuth login for Figma; your browser may open for consent"
+  run_cmd opencode mcp auth "$FIGMA_SERVER_NAME"
+}
+
 configure_opencode() {
   ensure_install_globals
   local api_key="${1:-}"
@@ -497,5 +722,41 @@ wire_context7_to_tools() {
   local tool
   for tool in "$@"; do
     wire_context7_to_tool "$tool" "$api_key"
+  done
+}
+
+wire_figma_to_tool() {
+  ensure_install_globals
+  local tool="$1"
+  local client_id="$2"
+  local client_secret="$3"
+
+  case "$tool" in
+    opencode)
+      if [[ -z "$client_id" || -z "$client_secret" ]]; then
+        ensure_figma_opencode_credentials
+        client_id="$FIGMA_CLIENT_ID_INPUT"
+        client_secret="$FIGMA_CLIENT_SECRET_INPUT"
+      fi
+      configure_figma_opencode "$client_id" "$client_secret"
+      authenticate_figma_opencode
+      ;;
+    github-copilot)
+      warn "Figma MCP is not wired automatically for GitHub Copilot here; use a tool with a native CLI OAuth flow"
+      ;;
+    *)
+      warn "No native Figma MCP wiring strategy is defined for $tool"
+      ;;
+  esac
+}
+
+wire_figma_to_tools() {
+  local client_id="$1"
+  local client_secret="$2"
+  shift 2
+  ensure_install_globals
+  local tool
+  for tool in "$@"; do
+    wire_figma_to_tool "$tool" "$client_id" "$client_secret"
   done
 }

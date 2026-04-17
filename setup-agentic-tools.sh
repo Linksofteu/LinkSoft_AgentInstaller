@@ -26,6 +26,10 @@ SKILL_NAMES=(
 )
 CONTEXT7_SERVER_NAME="context7"
 CONTEXT7_URL="https://mcp.context7.com/mcp"
+FIGMA_SERVER_NAME="figma"
+FIGMA_URL="https://mcp.figma.com/mcp"
+FIGMA_REGISTER_URL="https://api.figma.com/v1/oauth/mcp/register"
+FIGMA_OPENCODE_REDIRECT_URI="http://127.0.0.1:19876/mcp/oauth/callback"
 DEFAULT_LOG_FILE="$SCRIPT_DIR/setup-agentic-tools.log"
 
 NON_INTERACTIVE=0
@@ -36,6 +40,9 @@ LOG_FILE=""
 TOOLS_CSV=""
 ADDITIONAL_TOOLS_CSV=""
 CONTEXT7_API_KEY_INPUT=""
+ENABLE_FIGMA=1
+FIGMA_CLIENT_ID_INPUT=""
+FIGMA_CLIENT_SECRET_INPUT=""
 SKIP_SKILLS=0
 SKIP_MCP=0
 SKIP_VERIFY=0
@@ -45,7 +52,8 @@ usage() {
 Usage: $(basename "$0") [options]
 
 Installs the default LinkSoft skills via npx skills, installs/configures Context7,
-then runs static and smoke verification where supported.
+optionally wires Figma MCP for supported tools, then runs static and smoke
+verification where supported.
 
 Version: $VERSION
 
@@ -53,6 +61,9 @@ Options:
   --tools CSV              Final tool ids to configure
   --extra-tools CSV        Additional tool ids to merge with detected tools
   --context7-api-key KEY   Optional Context7 API key
+  --figma                  Enable Figma MCP wiring where supported (default)
+  --figma-client-id ID     Pre-registered Figma OAuth client id
+  --figma-client-secret S  Pre-registered Figma OAuth client secret
   --log-file PATH          Log file path (default: $DEFAULT_LOG_FILE)
   --copy-skills            Use --copy instead of symlinks for skills installation
   --skip-skills            Skip the npx skills installation step
@@ -84,6 +95,22 @@ parse_args() {
       --context7-api-key)
         [[ $# -ge 2 ]] || die "--context7-api-key requires a value"
         CONTEXT7_API_KEY_INPUT="$2"
+        shift 2
+        ;;
+      --figma)
+        ENABLE_FIGMA=1
+        shift
+        ;;
+      --figma-client-id)
+        [[ $# -ge 2 ]] || die "--figma-client-id requires a value"
+        FIGMA_CLIENT_ID_INPUT="$2"
+        ENABLE_FIGMA=1
+        shift 2
+        ;;
+      --figma-client-secret)
+        [[ $# -ge 2 ]] || die "--figma-client-secret requires a value"
+        FIGMA_CLIENT_SECRET_INPUT="$2"
+        ENABLE_FIGMA=1
         shift 2
         ;;
       --log-file)
@@ -152,6 +179,7 @@ main() {
   debug "tools_csv=${TOOLS_CSV:-<empty>}"
   debug "extra_tools_csv=${ADDITIONAL_TOOLS_CSV:-<empty>}"
   debug "context7_api_key_provided=$([[ -n "$CONTEXT7_API_KEY_INPUT" ]] && printf yes || printf no)"
+  debug "figma_enabled=$ENABLE_FIGMA figma_client_id_provided=$([[ -n "$FIGMA_CLIENT_ID_INPUT" ]] && printf yes || printf no) figma_client_secret_provided=$([[ -n "$FIGMA_CLIENT_SECRET_INPUT" ]] && printf yes || printf no)"
 
   local -a detected_tools=()
   detect_installed_tools detected_tools
@@ -273,6 +301,10 @@ main() {
     phase 3 5 "Installing and wiring MCP"
     install_context7_server "$api_key"
     wire_context7_to_tools "$api_key" "${validated_tools[@]}"
+    if (( ENABLE_FIGMA )) && selected_tools_support_figma "${validated_tools[@]}"; then
+      install_figma_server
+      wire_figma_to_tools "$FIGMA_CLIENT_ID_INPUT" "$FIGMA_CLIENT_SECRET_INPUT" "${validated_tools[@]}"
+    fi
   else
     log "Skipping MCP installation"
   fi
@@ -290,7 +322,11 @@ main() {
   log "Done"
   note "$(format_label "Configured tools:") $(format_value "$(join_by ', ' "${validated_tools[@]}")")"
   note "$(format_label "Skill sources:") $(format_value "$(join_by ', ' "${SKILL_SOURCES[@]}")")"
-  note "$(format_label "MCP server:") $(format_value "$CONTEXT7_SERVER_NAME")"
+  if (( ENABLE_FIGMA )); then
+    note "$(format_label "MCP servers:") $(format_value "$CONTEXT7_SERVER_NAME, $FIGMA_SERVER_NAME")"
+  else
+    note "$(format_label "MCP server:") $(format_value "$CONTEXT7_SERVER_NAME")"
+  fi
   note "$(format_label "Log file:") $(format_value "$LOG_FILE")"
 }
 

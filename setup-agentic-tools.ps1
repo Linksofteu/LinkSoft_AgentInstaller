@@ -17,6 +17,10 @@ $script:SkillNames = @(
 )
 $script:Context7ServerName = 'context7'
 $script:Context7Url = 'https://mcp.context7.com/mcp'
+$script:FigmaServerName = 'figma'
+$script:FigmaUrl = 'https://mcp.figma.com/mcp'
+$script:FigmaRegisterUrl = 'https://api.figma.com/v1/oauth/mcp/register'
+$script:FigmaOpenCodeRedirectUri = 'http://127.0.0.1:19876/mcp/oauth/callback'
 $script:DefaultLogFile = Join-Path $script:ScriptDir 'setup-agentic-tools.log'
 $script:KnownTools = @(
   'opencode',
@@ -43,6 +47,9 @@ $script:Options = [ordered]@{
   ToolsCsv = ''
   AdditionalToolsCsv = ''
   Context7ApiKey = ''
+  EnableFigma = $true
+  FigmaClientId = ''
+  FigmaClientSecret = ''
   SkipSkills = $false
   SkipMcp = $false
   SkipVerify = $false
@@ -246,6 +253,17 @@ function Test-ToolHasMcpCliCheck([string]$Tool) {
   return @('opencode', 'claude-code', 'codex', 'gemini-cli') -contains $Tool
 }
 
+function Test-ToolSupportsFigmaMcp([string]$Tool) {
+  return @('opencode') -contains $Tool
+}
+
+function Test-SelectedToolsSupportFigma([string[]]$Tools) {
+  foreach ($tool in $Tools) {
+    if (Test-ToolSupportsFigmaMcp $tool) { return $true }
+  }
+  return $false
+}
+
 function Detect-Tool([string]$Tool) {
   $userHome = Get-HomePath
   $appData = Get-AppDataPath
@@ -297,7 +315,8 @@ function Show-Usage {
 Usage: setup-agentic-tools.ps1 [options]
 
 Installs the default LinkSoft skills via npx skills, installs/configures Context7,
-then runs static and smoke verification where supported.
+optionally wires Figma MCP for supported tools, then runs static and smoke
+verification where supported.
 
 Version: $($script:Version)
 
@@ -305,6 +324,9 @@ Options:
   --tools CSV              Final tool ids to configure
   --extra-tools CSV        Additional tool ids to merge with detected tools
   --context7-api-key KEY   Optional Context7 API key
+  --figma                  Enable Figma MCP wiring where supported (default)
+  --figma-client-id ID     Pre-registered Figma OAuth client id
+  --figma-client-secret S  Pre-registered Figma OAuth client secret
   --log-file PATH          Log file path (default: $($script:DefaultLogFile))
   --copy-skills            Use --copy instead of symlinks for skills installation
   --skip-skills            Skip the npx skills installation step
@@ -340,6 +362,25 @@ function Parse-Args([string[]]$CliArgs) {
       '--context7-api-key' {
         if ($i + 1 -ge $CliArgs.Count) { Fail '--context7-api-key requires a value' }
         $script:Options.Context7ApiKey = $CliArgs[$i + 1]
+        $i += 2
+        continue
+      }
+      '--figma' {
+        $script:Options.EnableFigma = $true
+        $i += 1
+        continue
+      }
+      '--figma-client-id' {
+        if ($i + 1 -ge $CliArgs.Count) { Fail '--figma-client-id requires a value' }
+        $script:Options.FigmaClientId = $CliArgs[$i + 1]
+        $script:Options.EnableFigma = $true
+        $i += 2
+        continue
+      }
+      '--figma-client-secret' {
+        if ($i + 1 -ge $CliArgs.Count) { Fail '--figma-client-secret requires a value' }
+        $script:Options.FigmaClientSecret = $CliArgs[$i + 1]
+        $script:Options.EnableFigma = $true
         $i += 2
         continue
       }
@@ -782,6 +823,84 @@ function Configure-JsonContext7Server([string]$Path, [string]$Mode, [string]$Api
   Write-JsonDocument $Path $data
 }
 
+function Configure-OpenCodeFigma([string]$ClientId, [string]$ClientSecret) {
+  Log 'Configuring OpenCode with direct Figma MCP'
+  $path = Get-OpenCodeConfigPath
+  if ($script:Options.DryRun) {
+    Note "Would update $path with a Figma remote MCP entry"
+    return
+  }
+
+  Backup-FileIfPresent $path
+  $data = Read-JsoncDocument $path
+  Set-JsonPropertyValue $data '$schema' 'https://opencode.ai/config.json'
+  $mcp = Ensure-JsonObjectProperty $data 'mcp'
+  $oauth = [ordered]@{
+    clientId = $ClientId
+    clientSecret = $ClientSecret
+  }
+  $value = [ordered]@{
+    enabled = $true
+    type = 'remote'
+    url = $script:FigmaUrl
+    oauth = [pscustomobject]$oauth
+  }
+  Set-JsonPropertyValue $mcp $script:FigmaServerName ([pscustomobject]$value)
+  Write-JsonDocument $path $data
+}
+
+function Register-FigmaOpenCodeClient {
+  $body = [ordered]@{
+    client_name = 'LinkSoft Agent Installer (opencode)'
+    redirect_uris = @($script:FigmaOpenCodeRedirectUri)
+    grant_types = @('authorization_code', 'refresh_token')
+    response_types = @('code')
+    token_endpoint_auth_method = 'none'
+  } | ConvertTo-Json -Depth 10
+
+  if ($script:Options.DryRun) {
+    Note "Would register a Figma OAuth client for OpenCode using callback $($script:FigmaOpenCodeRedirectUri)"
+    return
+  }
+
+  try {
+    $response = Invoke-RestMethod -Method Post -Uri $script:FigmaRegisterUrl -ContentType 'application/json' -Body $body
+  } catch {
+    Fail "Failed to register Figma OAuth client for OpenCode: $($_.Exception.Message)"
+  }
+
+  if ([string]::IsNullOrWhiteSpace($response.client_id) -or [string]::IsNullOrWhiteSpace($response.client_secret)) {
+    Fail 'Figma OAuth registration response did not include client_id and client_secret'
+  }
+
+  $script:Options.FigmaClientId = $response.client_id
+  $script:Options.FigmaClientSecret = $response.client_secret
+  Note "Registered a Figma OAuth client for OpenCode using callback $($script:FigmaOpenCodeRedirectUri)"
+}
+
+function Ensure-FigmaOpenCodeCredentials {
+  if (-not [string]::IsNullOrWhiteSpace($script:Options.FigmaClientId) -and -not [string]::IsNullOrWhiteSpace($script:Options.FigmaClientSecret)) {
+    return
+  }
+  Register-FigmaOpenCodeClient
+}
+
+function Invoke-OpenCodeFigmaAuth {
+  if ($script:Options.DryRun) {
+    Note "Would run: opencode mcp auth $($script:FigmaServerName)"
+    return
+  }
+
+  if (-not (Test-CommandExists 'opencode')) {
+    Warn 'OpenCode executable not found; skipping automatic Figma OAuth login'
+    return
+  }
+
+  [void](Invoke-ExternalCommand -Command @('opencode', 'mcp', 'logout', $script:FigmaServerName) -IgnoreExitCode)
+  Note 'Starting native OpenCode OAuth login for Figma; your browser may open for consent'
+  [void](Invoke-ExternalCommand -Command @('opencode', 'mcp', 'auth', $script:FigmaServerName))
+}
+
 function Configure-OpenCode([string]$ApiKey) {
   Log 'Configuring OpenCode with direct Context7 MCP'
   $path = Get-OpenCodeConfigPath
@@ -875,6 +994,18 @@ function Install-Context7Server([string]$ApiKey) {
   Note 'No standalone MCP manager is used; supported tools are configured directly'
 }
 
+function Install-FigmaServer {
+  Log 'Preparing direct Figma MCP configuration'
+
+  if ($script:Options.DryRun) {
+    Note "Would configure supported tools with a direct remote MCP entry for '$($script:FigmaServerName)'"
+    Note 'Would use each tool''s native OAuth/browser flow when available'
+    return
+  }
+
+  Note 'Figma MCP is only wired for tools with a documented native OAuth/browser flow'
+}
+
 function Wire-Context7ToTool([string]$Tool, [string]$ApiKey) {
   switch ($Tool) {
     'opencode' { Configure-OpenCode $ApiKey; return }
@@ -899,6 +1030,31 @@ function Wire-Context7ToTool([string]$Tool, [string]$ApiKey) {
 function Wire-Context7ToTools([string]$ApiKey, [string[]]$Tools) {
   foreach ($tool in $Tools) {
     Wire-Context7ToTool $tool $ApiKey
+  }
+}
+
+function Wire-FigmaToTool([string]$Tool) {
+  switch ($Tool) {
+    'opencode' {
+      Ensure-FigmaOpenCodeCredentials
+      Configure-OpenCodeFigma $script:Options.FigmaClientId $script:Options.FigmaClientSecret
+      Invoke-OpenCodeFigmaAuth
+      return
+    }
+    'github-copilot' {
+      Warn 'Figma MCP is not wired automatically for GitHub Copilot here; use a tool with a native CLI OAuth flow'
+      return
+    }
+    default {
+      Warn "No native Figma MCP wiring strategy is defined for $Tool"
+      return
+    }
+  }
+}
+
+function Wire-FigmaToTools([string[]]$Tools) {
+  foreach ($tool in $Tools) {
+    Wire-FigmaToTool $tool
   }
 }
 
@@ -971,6 +1127,7 @@ function Verify-McpStatic([string[]]$Tools) {
   }
 
   $escapedServerName = [regex]::Escape("`"$($script:Context7ServerName)`"")
+  $escapedFigmaName = [regex]::Escape("`"$($script:FigmaServerName)`"")
   $escapedUrl = [regex]::Escape($script:Context7Url)
   foreach ($tool in $Tools) {
     switch ($tool) {
@@ -981,6 +1138,13 @@ function Verify-McpStatic([string[]]$Tools) {
           Report-VerificationCheck 'PASS' 'mcp/opencode' "OpenCode config contains a direct $($script:Context7ServerName) remote server"
         } else {
           Report-VerificationCheck 'FAIL' 'mcp/opencode' "OpenCode config missing $($script:Context7ServerName)"
+        }
+        if ($script:Options.EnableFigma) {
+          if ($content -and ($content -match $escapedFigmaName) -and ($content -match '"clientId"')) {
+            Report-VerificationCheck 'PASS' 'mcp-figma/opencode' "OpenCode config contains a direct $($script:FigmaServerName) remote server"
+          } else {
+            Report-VerificationCheck 'FAIL' 'mcp-figma/opencode' "OpenCode config missing $($script:FigmaServerName)"
+          }
         }
         continue
       }
@@ -1128,6 +1292,16 @@ function Verify-McpSmoke([string[]]$Tools) {
           } else {
             Report-VerificationCheck 'FAIL' 'mcp-cli/opencode' 'unable to query opencode mcp list'
           }
+          if ($script:Options.EnableFigma) {
+            $escapedFigmaCliName = [regex]::Escape($script:FigmaServerName)
+            if ($result.Success -and $result.Output -match $escapedFigmaCliName) {
+              Report-VerificationCheck 'PASS' 'mcp-cli-figma/opencode' "opencode mcp list included $($script:FigmaServerName)"
+            } elseif ($result.Success) {
+              Report-VerificationCheck 'FAIL' 'mcp-cli-figma/opencode' "opencode mcp list did not include $($script:FigmaServerName)"
+            } else {
+              Report-VerificationCheck 'FAIL' 'mcp-cli-figma/opencode' "unable to query opencode mcp list for $($script:FigmaServerName)"
+            }
+          }
         }
       }
       'claude-code' {
@@ -1216,8 +1390,15 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Write-MviHeader $tool
         Note "  1. Open OpenCode."
         Note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
-        Note "  3. Confirm installed skills include: $installedSkills"
-        Note "  4. Prompt in chat: Run the test-skill skill."
+        if ($script:Options.EnableFigma) {
+          Note "  3. Run in chat: Use Figma to inspect the current selection."
+          Note "     Confirm $($script:FigmaServerName) is listed and authenticated in OpenCode MCP settings."
+          Note "  4. Confirm installed skills include: $installedSkills"
+          Note "  5. Prompt in chat: Run the test-skill skill."
+        } else {
+          Note "  3. Confirm installed skills include: $installedSkills"
+          Note "  4. Prompt in chat: Run the test-skill skill."
+        }
         Note "     Expected: `"$skillResponse`""
       }
       'codex' {
@@ -1433,6 +1614,7 @@ function Main([string[]]$CliArgs) {
   Debug-Note "tools_csv=$($script:Options.ToolsCsv)"
   Debug-Note "extra_tools_csv=$($script:Options.AdditionalToolsCsv)"
   Debug-Note ("context7_api_key_provided={0}" -f (-not [string]::IsNullOrWhiteSpace($script:Options.Context7ApiKey)))
+  Debug-Note ("figma_enabled={0} figma_client_id_provided={1} figma_client_secret_provided={2}" -f $script:Options.EnableFigma, (-not [string]::IsNullOrWhiteSpace($script:Options.FigmaClientId)), (-not [string]::IsNullOrWhiteSpace($script:Options.FigmaClientSecret)))
 
   $validatedTools = Select-Tools
 
@@ -1452,6 +1634,10 @@ function Main([string[]]$CliArgs) {
     Phase 3 5 'Installing and wiring MCP'
     Install-Context7Server $apiKey
     Wire-Context7ToTools $apiKey $validatedTools
+    if ($script:Options.EnableFigma -and (Test-SelectedToolsSupportFigma $validatedTools)) {
+      Install-FigmaServer
+      Wire-FigmaToTools $validatedTools
+    }
   } else {
     Log 'Skipping MCP installation'
   }
@@ -1469,7 +1655,11 @@ function Main([string[]]$CliArgs) {
   Log 'Done'
   Note "$(Format-Label 'Configured tools:') $(Format-Value (Join-Items ', ' $validatedTools))"
   Note "$(Format-Label 'Skill sources:') $(Format-Value (Join-Items ', ' $script:SkillSources))"
-  Note "$(Format-Label 'MCP server:') $(Format-Value $script:Context7ServerName)"
+  if ($script:Options.EnableFigma) {
+    Note "$(Format-Label 'MCP servers:') $(Format-Value "$($script:Context7ServerName), $($script:FigmaServerName)")"
+  } else {
+    Note "$(Format-Label 'MCP server:') $(Format-Value $script:Context7ServerName)"
+  }
   Note "$(Format-Label 'Log file:') $(Format-Value $script:Options.LogFile)"
 }
 

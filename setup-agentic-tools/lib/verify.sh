@@ -8,6 +8,7 @@ VERIFY_FAILED_LABELS=()
 
 ensure_verify_globals() {
   : "${CONTEXT7_SERVER_NAME:?CONTEXT7_SERVER_NAME must be set}"
+  : "${FIGMA_SERVER_NAME:?FIGMA_SERVER_NAME must be set}"
   ((${#SKILL_NAMES[@]} > 0)) || die "SKILL_NAMES must not be empty"
 }
 
@@ -89,6 +90,13 @@ verify_mcp_static() {
           report_verification_check "PASS" "mcp/opencode" "OpenCode config contains a direct $CONTEXT7_SERVER_NAME remote server"
         else
           report_verification_check "FAIL" "mcp/opencode" "OpenCode config missing $CONTEXT7_SERVER_NAME"
+        fi
+        if (( ENABLE_FIGMA )); then
+          if grep -q "\"$FIGMA_SERVER_NAME\"" "$HOME/.config/opencode/opencode.json" 2>/dev/null && grep -q '"clientId"' "$HOME/.config/opencode/opencode.json" 2>/dev/null; then
+            report_verification_check "PASS" "mcp-figma/opencode" "OpenCode config contains a direct $FIGMA_SERVER_NAME remote server"
+          else
+            report_verification_check "FAIL" "mcp-figma/opencode" "OpenCode config missing $FIGMA_SERVER_NAME"
+          fi
         fi
         ;;
       claude-code)
@@ -228,8 +236,18 @@ verify_mcp_smoke() {
           else
             report_verification_check "FAIL" "mcp-cli/opencode" "opencode mcp list did not include $CONTEXT7_SERVER_NAME"
           fi
+          if (( ENABLE_FIGMA )); then
+            if grep -q "$FIGMA_SERVER_NAME" <<<"$output"; then
+              report_verification_check "PASS" "mcp-cli-figma/opencode" "opencode mcp list included $FIGMA_SERVER_NAME"
+            else
+              report_verification_check "FAIL" "mcp-cli-figma/opencode" "opencode mcp list did not include $FIGMA_SERVER_NAME"
+            fi
+          fi
         else
           report_verification_check "FAIL" "mcp-cli/opencode" "unable to query opencode mcp list"
+          if (( ENABLE_FIGMA )); then
+            report_verification_check "FAIL" "mcp-cli-figma/opencode" "unable to query opencode mcp list for $FIGMA_SERVER_NAME"
+          fi
         fi
         ;;
       claude-code)

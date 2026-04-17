@@ -209,6 +209,24 @@ tool_has_mcp_cli_check() {
   esac
 }
 
+tool_supports_figma_mcp() {
+  local tool="$1"
+  case "$tool" in
+    opencode) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+selected_tools_support_figma() {
+  local tool
+  for tool in "$@"; do
+    if tool_supports_figma_mcp "$tool"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 tool_has_native_skills_shell_check() {
   return 1
 }
@@ -253,6 +271,9 @@ print_manual_verification_instructions() {
         note "  1. Open Claude Code."
         note "  2. Run in chat: /mcp"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for Claude Code in this installer yet.)"
+        fi
         note "  3. Confirm installed skills include: ${installed_skills}"
         note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
@@ -261,8 +282,15 @@ print_manual_verification_instructions() {
         _mvi_header "$tool"
         note "  1. Open OpenCode."
         note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
-        note "  3. Confirm installed skills include: ${installed_skills}"
-        note "  4. Prompt in chat: Run the test-skill skill."
+        if (( ENABLE_FIGMA )); then
+          note "  3. Run in chat: Use Figma to inspect the current selection."
+          note "     Confirm ${FIGMA_SERVER_NAME} is listed and authenticated in OpenCode MCP settings."
+          note "  4. Confirm installed skills include: ${installed_skills}"
+          note "  5. Prompt in chat: Run the test-skill skill."
+        else
+          note "  3. Confirm installed skills include: ${installed_skills}"
+          note "  4. Prompt in chat: Run the test-skill skill."
+        fi
         note "     Expected: \"${skill_response}\""
         ;;
       codex)
@@ -270,6 +298,9 @@ print_manual_verification_instructions() {
         note "  1. Open Codex."
         note "  2. Run in chat: /mcp"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for Codex in this installer yet.)"
+        fi
         note "  3. Run in chat: /skills"
         note "     Confirm ${installed_skills} are listed."
         note "  4. Prompt in chat: Run the test-skill skill."
@@ -280,6 +311,9 @@ print_manual_verification_instructions() {
         note "  1. Open Gemini CLI."
         note "  2. Run in chat: /mcp"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for Gemini CLI in this installer yet.)"
+        fi
         note "  3. Confirm installed skills include: ${installed_skills}"
         note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
@@ -289,6 +323,9 @@ print_manual_verification_instructions() {
         note "  1. Open GitHub Copilot CLI."
         note "  2. Run in chat: /mcp"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for GitHub Copilot CLI in this installer yet.)"
+        fi
         note "  3. Run in chat: /skills list"
         note "     Confirm ${installed_skills} are listed."
         note "  4. Prompt in chat: Run the test-skill skill."
@@ -299,6 +336,9 @@ print_manual_verification_instructions() {
         note "  1. Open VS Code."
         note "  2. Open Command Palette (Ctrl+Shift+P) → MCP: List Servers."
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for VS Code in this installer yet.)"
+        fi
         note "  3. Open Copilot Chat in Agent mode."
         note "     Confirm skill tools appear in the tools panel."
         note "  4. Confirm installed skills include: ${installed_skills}"
@@ -311,6 +351,9 @@ print_manual_verification_instructions() {
         note "  2. Open Command Palette (Ctrl+Shift+P) → MCP: List Servers."
         note "     (MCP is wired via the vscode target)"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for GitHub Copilot in this installer yet.)"
+        fi
         note "  3. Open Copilot Chat in Agent mode."
         note "     Confirm skill tools appear in the tools panel."
         note "  4. Confirm installed skills include: ${installed_skills}"
@@ -322,6 +365,9 @@ print_manual_verification_instructions() {
         note "  1. Open Cline."
         note "  2. Open MCP Servers panel."
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed and connected."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for Cline in this installer yet.)"
+        fi
         note "  3. Confirm installed skills include: ${installed_skills}"
         note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
@@ -331,6 +377,9 @@ print_manual_verification_instructions() {
         note "  1. Open Cursor."
         note "  2. Open Settings → MCP."
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for Cursor in this installer yet.)"
+        fi
         note "  3. Confirm installed skills include: ${installed_skills}"
         note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
@@ -340,6 +389,9 @@ print_manual_verification_instructions() {
         note "  1. Open Windsurf."
         note "  2. Open Cascade → MCP panel."
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for Windsurf in this installer yet.)"
+        fi
         note "  3. Confirm installed skills include: ${installed_skills}"
         note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
@@ -349,6 +401,9 @@ print_manual_verification_instructions() {
         note "  1. Open VS Code with Roo."
         note "  2. Open MCP Servers panel."
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed and connected."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for Roo in this installer yet.)"
+        fi
         note "  3. Confirm installed skills include: ${installed_skills}"
         note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
@@ -357,6 +412,9 @@ print_manual_verification_instructions() {
         _mvi_header "$tool"
         note "  1. Open VS Code with Continue."
         note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for Continue in this installer yet.)"
+        fi
         note "  3. Confirm installed skills include: ${installed_skills}"
         note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
@@ -365,6 +423,9 @@ print_manual_verification_instructions() {
         _mvi_header "$tool"
         note "  1. Open Goose."
         note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
+        if (( ENABLE_FIGMA )); then
+          note "     (Figma MCP is not wired automatically for Goose in this installer yet.)"
+        fi
         note "  3. Confirm installed skills include: ${installed_skills}"
         note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
