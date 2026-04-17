@@ -508,6 +508,15 @@ function Ensure-Prereqs {
   }
 }
 
+function Show-NpmUserPrefixGuidance {
+  $homePath = Get-HomePath
+  Note 'To avoid sudo for global npm packages, configure npm to use a user-owned directory:'
+  Note ("  mkdir -p `"{0}/.npm-global`"" -f $homePath)
+  Note ("  npm config set prefix `"{0}/.npm-global`"" -f $homePath)
+  Note ("  export PATH=`"{0}/.npm-global/bin:`$PATH`"" -f $homePath)
+  Note 'Then add that export line to your shell profile (for example ~/.bashrc), reload your shell, and rerun this installer.'
+}
+
 function Ensure-OpenSpec {
   if (Test-CommandExists 'openspec') {
     $path = (Get-Command 'openspec').Source
@@ -530,7 +539,15 @@ function Ensure-OpenSpec {
   $answer = Read-Host 'openspec is missing. Install it globally with npm now? [y/N]'
   if ($answer -match '^(?i:y|yes)$') {
     Log 'Installing openspec globally'
-    [void](Invoke-ExternalCommand -Command @('npm', 'install', '-g', 'openspec'))
+    $result = Invoke-CaptureCommandOutput @('npm', 'install', '-g', 'openspec')
+    if (-not $result.Success) {
+      if (-not [string]::IsNullOrWhiteSpace($result.Output)) {
+        Write-Host $result.Output
+      }
+      Warn 'Automatic openspec installation failed. This is commonly caused by npm global install permissions.'
+      Show-NpmUserPrefixGuidance
+      Fail 'Unable to install openspec automatically'
+    }
   } else {
     Note 'Skipping openspec installation'
   }

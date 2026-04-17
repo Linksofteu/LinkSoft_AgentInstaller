@@ -105,6 +105,16 @@ If PowerShell blocks direct script execution, use:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
+If npm global package installation fails with a permissions error, configure a user-owned npm global directory and retry:
+
+```bash
+mkdir -p "$HOME/.npm-global"
+npm config set prefix "$HOME/.npm-global"
+export PATH="$HOME/.npm-global/bin:$PATH"
+```
+
+Then add the `export PATH=...` line to your shell profile and restart your shell.
+
 ## Local run
 
 ```bash

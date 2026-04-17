@@ -20,6 +20,14 @@ ensure_prereqs() {
   has_cmd python3 || die "python3 is required"
 }
 
+print_npm_user_prefix_guidance() {
+  note "To avoid sudo for global npm packages, configure npm to use a user-owned directory:"
+  note "  mkdir -p \"$HOME/.npm-global\""
+  note "  npm config set prefix \"$HOME/.npm-global\""
+  note "  export PATH=\"$HOME/.npm-global/bin:\$PATH\""
+  note "Then add that export line to your shell profile (for example ~/.bashrc), reload your shell, and rerun this installer."
+}
+
 ensure_openspec() {
   if has_cmd openspec; then
     note "$(format_label "OpenSpec:") $(format_value "installed at $(command -v openspec)")"
@@ -43,7 +51,11 @@ ensure_openspec() {
   case "$install_openspec" in
     y|Y|yes|YES)
       log "Installing openspec globally"
-      run_cmd npm install -g openspec
+      if ! run_cmd npm install -g openspec; then
+        warn "Automatic openspec installation failed. This is commonly caused by npm global install permissions."
+        print_npm_user_prefix_guidance
+        die "Unable to install openspec automatically"
+      fi
       ;;
     *)
       note "Skipping openspec installation"
