@@ -36,11 +36,13 @@ irm https://raw.githubusercontent.com/Linksofteu/LinkSoft_AgentInstaller/main/in
 
 - `context7`
 - `figma` where native CLI OAuth is supported
+- `browsermcp` where the tool supports local MCP server config
 
 ## Current important notes
 
-- Figma MCP is currently automated for **OpenCode**
-- Browser MCP requires the browser extension install shown by the installer at the end
+- Figma MCP is currently automated for **OpenCode** and **Claude Code**
+- Browser MCP server config is currently automated for **OpenCode** and **Claude Code**
+- Browser MCP still requires the browser extension install shown by the installer at the end
 - no Figma workaround auth is used for tools that do not support native CLI/browser auth
 - by default, installer logs are written to `~/.local/state/linksoft-agent-installer/logs/` on Linux/macOS
 

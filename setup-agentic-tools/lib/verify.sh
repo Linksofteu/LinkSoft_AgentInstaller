@@ -98,12 +98,29 @@ verify_mcp_static() {
             report_verification_check "FAIL" "mcp-figma/opencode" "OpenCode config missing $FIGMA_SERVER_NAME"
           fi
         fi
+        if grep -q "\"$BROWSER_MCP_SERVER_NAME\"" "$HOME/.config/opencode/opencode.json" 2>/dev/null && grep -q '"type": "local"' "$HOME/.config/opencode/opencode.json" 2>/dev/null; then
+          report_verification_check "PASS" "mcp-browser/opencode" "OpenCode config contains a local $BROWSER_MCP_SERVER_NAME server"
+        else
+          report_verification_check "FAIL" "mcp-browser/opencode" "OpenCode config missing $BROWSER_MCP_SERVER_NAME"
+        fi
         ;;
       claude-code)
         if grep -q '"mcpServers"' "$HOME/.claude.json" 2>/dev/null && grep -q "\"$CONTEXT7_SERVER_NAME\"" "$HOME/.claude.json" 2>/dev/null; then
           report_verification_check "PASS" "mcp/claude-code" "Claude Code config contains $CONTEXT7_SERVER_NAME"
         else
           report_verification_check "FAIL" "mcp/claude-code" "Claude Code config missing $CONTEXT7_SERVER_NAME"
+        fi
+        if (( ENABLE_FIGMA )); then
+          if grep -q "\"$FIGMA_SERVER_NAME\"" "$HOME/.claude.json" 2>/dev/null || { has_cmd claude && capture_cmd claude mcp list 2>/dev/null | grep -q "$FIGMA_SERVER_NAME"; }; then
+            report_verification_check "PASS" "mcp-figma/claude-code" "Claude Code includes $FIGMA_SERVER_NAME"
+          else
+            report_verification_check "FAIL" "mcp-figma/claude-code" "Claude Code missing $FIGMA_SERVER_NAME"
+          fi
+        fi
+        if grep -q "\"$BROWSER_MCP_SERVER_NAME\"" "$HOME/.claude.json" 2>/dev/null; then
+          report_verification_check "PASS" "mcp-browser/claude-code" "Claude Code config contains $BROWSER_MCP_SERVER_NAME"
+        else
+          report_verification_check "FAIL" "mcp-browser/claude-code" "Claude Code config missing $BROWSER_MCP_SERVER_NAME"
         fi
         ;;
       codex)
@@ -243,11 +260,17 @@ verify_mcp_smoke() {
               report_verification_check "FAIL" "mcp-cli-figma/opencode" "opencode mcp list did not include $FIGMA_SERVER_NAME"
             fi
           fi
+          if grep -q "$BROWSER_MCP_SERVER_NAME" <<<"$output"; then
+            report_verification_check "PASS" "mcp-cli-browser/opencode" "opencode mcp list included $BROWSER_MCP_SERVER_NAME"
+          else
+            report_verification_check "FAIL" "mcp-cli-browser/opencode" "opencode mcp list did not include $BROWSER_MCP_SERVER_NAME"
+          fi
         else
           report_verification_check "FAIL" "mcp-cli/opencode" "unable to query opencode mcp list"
           if (( ENABLE_FIGMA )); then
             report_verification_check "FAIL" "mcp-cli-figma/opencode" "unable to query opencode mcp list for $FIGMA_SERVER_NAME"
           fi
+          report_verification_check "FAIL" "mcp-cli-browser/opencode" "unable to query opencode mcp list for $BROWSER_MCP_SERVER_NAME"
         fi
         ;;
       claude-code)
@@ -259,8 +282,24 @@ verify_mcp_smoke() {
           else
             report_verification_check "FAIL" "mcp-cli/claude-code" "claude mcp list did not include $CONTEXT7_SERVER_NAME"
           fi
+          if (( ENABLE_FIGMA )); then
+            if grep -q "$FIGMA_SERVER_NAME" <<<"$output"; then
+              report_verification_check "PASS" "mcp-cli-figma/claude-code" "claude mcp list included $FIGMA_SERVER_NAME"
+            else
+              report_verification_check "FAIL" "mcp-cli-figma/claude-code" "claude mcp list did not include $FIGMA_SERVER_NAME"
+            fi
+          fi
+          if grep -q "$BROWSER_MCP_SERVER_NAME" <<<"$output"; then
+            report_verification_check "PASS" "mcp-cli-browser/claude-code" "claude mcp list included $BROWSER_MCP_SERVER_NAME"
+          else
+            report_verification_check "FAIL" "mcp-cli-browser/claude-code" "claude mcp list did not include $BROWSER_MCP_SERVER_NAME"
+          fi
         else
           report_verification_check "FAIL" "mcp-cli/claude-code" "unable to query claude mcp list"
+          if (( ENABLE_FIGMA )); then
+            report_verification_check "FAIL" "mcp-cli-figma/claude-code" "unable to query claude mcp list for $FIGMA_SERVER_NAME"
+          fi
+          report_verification_check "FAIL" "mcp-cli-browser/claude-code" "unable to query claude mcp list for $BROWSER_MCP_SERVER_NAME"
         fi
         ;;
       codex)

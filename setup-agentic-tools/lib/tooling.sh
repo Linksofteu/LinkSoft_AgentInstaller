@@ -212,7 +212,15 @@ tool_has_mcp_cli_check() {
 tool_supports_figma_mcp() {
   local tool="$1"
   case "$tool" in
-    opencode) return 0 ;;
+    opencode|claude-code) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+tool_supports_browser_mcp() {
+  local tool="$1"
+  case "$tool" in
+    opencode|claude-code) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -221,6 +229,16 @@ selected_tools_support_figma() {
   local tool
   for tool in "$@"; do
     if tool_supports_figma_mcp "$tool"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+selected_tools_support_browser_mcp() {
+  local tool
+  for tool in "$@"; do
+    if tool_supports_browser_mcp "$tool"; then
       return 0
     fi
   done
@@ -272,8 +290,9 @@ print_manual_verification_instructions() {
         note "  2. Run in chat: /mcp"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
         if (( ENABLE_FIGMA )); then
-          note "     (Figma MCP is not wired automatically for Claude Code in this installer yet.)"
+          note "     Confirm ${FIGMA_SERVER_NAME} is listed. Authenticate it from /mcp if prompted."
         fi
+        note "     Confirm ${BROWSER_MCP_SERVER_NAME} is listed after you install/connect the browser extension."
         note "  3. Confirm installed skills include: ${installed_skills}"
         note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
@@ -285,11 +304,13 @@ print_manual_verification_instructions() {
         if (( ENABLE_FIGMA )); then
           note "  3. Run in chat: Use Figma to inspect the current selection."
           note "     Confirm ${FIGMA_SERVER_NAME} is listed and authenticated in OpenCode MCP settings."
+          note "     Confirm ${BROWSER_MCP_SERVER_NAME} is listed after you install/connect the browser extension."
           note "  4. Confirm installed skills include: ${installed_skills}"
           note "  5. Prompt in chat: Run the test-skill skill."
         else
-          note "  3. Confirm installed skills include: ${installed_skills}"
-          note "  4. Prompt in chat: Run the test-skill skill."
+          note "  3. Confirm ${BROWSER_MCP_SERVER_NAME} is listed after you install/connect the browser extension."
+          note "  4. Confirm installed skills include: ${installed_skills}"
+          note "  5. Prompt in chat: Run the test-skill skill."
         fi
         note "     Expected: \"${skill_response}\""
         ;;

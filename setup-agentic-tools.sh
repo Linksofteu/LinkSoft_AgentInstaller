@@ -30,6 +30,9 @@ FIGMA_SERVER_NAME="figma"
 FIGMA_URL="https://mcp.figma.com/mcp"
 FIGMA_REGISTER_URL="https://api.figma.com/v1/oauth/mcp/register"
 FIGMA_OPENCODE_REDIRECT_URI="http://127.0.0.1:19876/mcp/oauth/callback"
+FIGMA_CLAUDE_CODE_REDIRECT_URI="http://localhost:19876/callback"
+BROWSER_MCP_SERVER_NAME="browsermcp"
+BROWSER_MCP_PACKAGE="@browsermcp/mcp@latest"
 BROWSER_MCP_EXTENSION_URL="https://chromewebstore.google.com/detail/browser-mcp-automate-your/bjfgambnhccakkhmkepdoekmckoijdlc?pli=1"
 DEFAULT_LOG_FILE="$(default_log_file_path)"
 
@@ -307,6 +310,10 @@ main() {
       install_figma_server
       wire_figma_to_tools "$FIGMA_CLIENT_ID_INPUT" "$FIGMA_CLIENT_SECRET_INPUT" "${validated_tools[@]}"
     fi
+    if selected_tools_support_browser_mcp "${validated_tools[@]}"; then
+      install_browser_server
+      wire_browser_to_tools "${validated_tools[@]}"
+    fi
   else
     log "Skipping MCP installation"
   fi
@@ -331,11 +338,14 @@ main() {
   log "Done"
   note "$(format_label "Configured tools:") $(format_value "$(join_by ', ' "${validated_tools[@]}")")"
   note "$(format_label "Skill sources:") $(format_value "$(join_by ', ' "${SKILL_SOURCES[@]}")")"
-  if (( ENABLE_FIGMA )); then
-    note "$(format_label "MCP servers:") $(format_value "$CONTEXT7_SERVER_NAME, $FIGMA_SERVER_NAME")"
-  else
-    note "$(format_label "MCP server:") $(format_value "$CONTEXT7_SERVER_NAME")"
+  local -a configured_servers=("$CONTEXT7_SERVER_NAME")
+  if (( ENABLE_FIGMA )) && selected_tools_support_figma "${validated_tools[@]}"; then
+    configured_servers+=("$FIGMA_SERVER_NAME")
   fi
+  if selected_tools_support_browser_mcp "${validated_tools[@]}"; then
+    configured_servers+=("$BROWSER_MCP_SERVER_NAME")
+  fi
+  note "$(format_label "MCP servers:") $(format_value "$(join_by ', ' "${configured_servers[@]}")")"
   note "$(format_label "Log file:") $(format_value "$LOG_FILE")"
 }
 

@@ -21,6 +21,9 @@ $script:FigmaServerName = 'figma'
 $script:FigmaUrl = 'https://mcp.figma.com/mcp'
 $script:FigmaRegisterUrl = 'https://api.figma.com/v1/oauth/mcp/register'
 $script:FigmaOpenCodeRedirectUri = 'http://127.0.0.1:19876/mcp/oauth/callback'
+$script:FigmaClaudeCodeRedirectUri = 'http://localhost:19876/callback'
+$script:BrowserMcpServerName = 'browsermcp'
+$script:BrowserMcpPackage = '@browsermcp/mcp@latest'
 $script:BrowserMcpExtensionUrl = 'https://chromewebstore.google.com/detail/browser-mcp-automate-your/bjfgambnhccakkhmkepdoekmckoijdlc?pli=1'
 $script:KnownTools = @(
   'opencode',
@@ -279,12 +282,23 @@ function Test-ToolHasMcpCliCheck([string]$Tool) {
 }
 
 function Test-ToolSupportsFigmaMcp([string]$Tool) {
-  return @('opencode') -contains $Tool
+  return @('opencode', 'claude-code') -contains $Tool
 }
 
 function Test-SelectedToolsSupportFigma([string[]]$Tools) {
   foreach ($tool in $Tools) {
     if (Test-ToolSupportsFigmaMcp $tool) { return $true }
+  }
+  return $false
+}
+
+function Test-ToolSupportsBrowserMcp([string]$Tool) {
+  return @('opencode', 'claude-code') -contains $Tool
+}
+
+function Test-SelectedToolsSupportBrowserMcp([string[]]$Tools) {
+  foreach ($tool in $Tools) {
+    if (Test-ToolSupportsBrowserMcp $tool) { return $true }
   }
   return $false
 }
@@ -900,6 +914,46 @@ function Configure-OpenCodeFigma([string]$ClientId, [string]$ClientSecret) {
   Write-JsonDocument $path $data
 }
 
+function Configure-OpenCodeBrowserMcp {
+  Log 'Configuring OpenCode with Browser MCP'
+  $path = Get-OpenCodeConfigPath
+  if ($script:Options.DryRun) {
+    Note "Would update $path with a Browser MCP local entry"
+    return
+  }
+
+  Backup-FileIfPresent $path
+  $data = Read-JsoncDocument $path
+  Set-JsonPropertyValue $data '$schema' 'https://opencode.ai/config.json'
+  $mcp = Ensure-JsonObjectProperty $data 'mcp'
+  $value = [ordered]@{
+    enabled = $true
+    type = 'local'
+    command = @('npx', '-y', $script:BrowserMcpPackage)
+  }
+  Set-JsonPropertyValue $mcp $script:BrowserMcpServerName ([pscustomobject]$value)
+  Write-JsonDocument $path $data
+}
+
+function Configure-ClaudeCodeBrowserMcp {
+  Log 'Configuring Claude Code with Browser MCP'
+  $path = Get-ClaudeCodeConfigPath
+  if ($script:Options.DryRun) {
+    Note "Would update $path with a Browser MCP local entry"
+    return
+  }
+
+  Backup-FileIfPresent $path
+  $data = Read-JsoncDocument $path
+  $mcpServers = Ensure-JsonObjectProperty $data 'mcpServers'
+  $value = [ordered]@{
+    command = 'npx'
+    args = @('-y', $script:BrowserMcpPackage)
+  }
+  Set-JsonPropertyValue $mcpServers $script:BrowserMcpServerName ([pscustomobject]$value)
+  Write-JsonDocument $path $data
+}
+
 function Register-FigmaOpenCodeClient {
   $body = @'
 {
@@ -937,11 +991,96 @@ function Register-FigmaOpenCodeClient {
   Note "Registered a Figma OAuth client for OpenCode using callback $($script:FigmaOpenCodeRedirectUri)"
 }
 
+function Register-FigmaClaudeCodeClient {
+  $body = @'
+{
+  "client_name": "Claude Code (figma)",
+  "redirect_uris": ["http://localhost:19876/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}
+'@
+
+  if ($script:Options.DryRun) {
+    Note "Would register a Figma OAuth client for Claude Code using callback $($script:FigmaClaudeCodeRedirectUri)"
+    return
+  }
+
+  try {
+    $rawResponse = Invoke-WebRequest -Method Post -Uri $script:FigmaRegisterUrl -ContentType 'application/json' -Body $body
+  } catch {
+    Fail "Failed to register Figma OAuth client for Claude Code: $($_.Exception.Message)"
+  }
+
+  try {
+    $response = $rawResponse.Content | ConvertFrom-Json
+  } catch {
+    Fail "Failed to parse Figma OAuth registration response for Claude Code: $($_.Exception.Message). Raw response: $($rawResponse.Content)"
+  }
+
+  if ([string]::IsNullOrWhiteSpace($response.client_id) -or [string]::IsNullOrWhiteSpace($response.client_secret)) {
+    Fail "Figma OAuth registration response did not include client_id and client_secret. Raw response: $($rawResponse.Content)"
+  }
+
+  $script:Options.FigmaClientId = $response.client_id
+  $script:Options.FigmaClientSecret = $response.client_secret
+  Note "Registered a Figma OAuth client for Claude Code using callback $($script:FigmaClaudeCodeRedirectUri)"
+}
+
 function Ensure-FigmaOpenCodeCredentials {
   if (-not [string]::IsNullOrWhiteSpace($script:Options.FigmaClientId) -and -not [string]::IsNullOrWhiteSpace($script:Options.FigmaClientSecret)) {
     return
   }
   Register-FigmaOpenCodeClient
+}
+
+function Ensure-FigmaClaudeCodeCredentials {
+  if (-not [string]::IsNullOrWhiteSpace($script:Options.FigmaClientId) -and -not [string]::IsNullOrWhiteSpace($script:Options.FigmaClientSecret)) {
+    return
+  }
+  Register-FigmaClaudeCodeClient
+}
+
+function Configure-ClaudeCodeFigma([string]$ClientId, [string]$ClientSecret) {
+  Log 'Configuring Claude Code with direct Figma MCP'
+  if ($script:Options.DryRun) {
+    Note 'Would add a Claude Code Figma MCP entry with pre-registered OAuth credentials'
+    return
+  }
+
+  if ([string]::IsNullOrWhiteSpace($ClientId)) {
+    Fail 'Cannot configure Claude Code Figma MCP without client_id'
+  }
+  if ([string]::IsNullOrWhiteSpace($ClientSecret)) {
+    Fail 'Cannot configure Claude Code Figma MCP without client_secret'
+  }
+  if (-not (Test-CommandExists 'claude')) {
+    Warn 'Claude executable not found; skipping automatic Claude Code Figma configuration'
+    return
+  }
+
+  $configJson = (@{
+      type = 'http'
+      url = $script:FigmaUrl
+      oauth = [ordered]@{
+        clientId = $ClientId
+        callbackPort = 19876
+      }
+    } | ConvertTo-Json -Depth 10 -Compress)
+
+  [void](Invoke-ExternalCommand -Command @('claude', 'mcp', 'remove', $script:FigmaServerName) -IgnoreExitCode)
+  $previousSecret = $env:MCP_CLIENT_SECRET
+  try {
+    $env:MCP_CLIENT_SECRET = $ClientSecret
+    [void](Invoke-ExternalCommand -Command @('claude', 'mcp', 'add-json', '--scope', 'user', $script:FigmaServerName, $configJson, '--client-secret'))
+  } finally {
+    if ($null -eq $previousSecret) {
+      Remove-Item Env:MCP_CLIENT_SECRET -ErrorAction SilentlyContinue
+    } else {
+      $env:MCP_CLIENT_SECRET = $previousSecret
+    }
+  }
 }
 
 function Clear-OpenCodeFigmaAuthCache {
@@ -1094,6 +1233,17 @@ function Install-FigmaServer {
   Note 'Figma MCP is only wired for tools with a documented native OAuth/browser flow'
 }
 
+function Install-BrowserMcpServer {
+  Log 'Preparing Browser MCP configuration'
+
+  if ($script:Options.DryRun) {
+    Note "Would configure supported tools with a local Browser MCP server entry for '$($script:BrowserMcpServerName)'"
+    return
+  }
+
+  Note 'Browser MCP server entries are wired directly for supported tools; the browser extension still must be installed manually'
+}
+
 function Wire-Context7ToTool([string]$Tool, [string]$ApiKey) {
   switch ($Tool) {
     'opencode' { Configure-OpenCode $ApiKey; return }
@@ -1129,6 +1279,11 @@ function Wire-FigmaToTool([string]$Tool) {
       Invoke-OpenCodeFigmaAuth
       return
     }
+    'claude-code' {
+      Ensure-FigmaClaudeCodeCredentials
+      Configure-ClaudeCodeFigma $script:Options.FigmaClientId $script:Options.FigmaClientSecret
+      return
+    }
     'github-copilot' {
       Warn 'Figma MCP is not wired automatically for GitHub Copilot here; use a tool with a native CLI OAuth flow'
       return
@@ -1143,6 +1298,23 @@ function Wire-FigmaToTool([string]$Tool) {
 function Wire-FigmaToTools([string[]]$Tools) {
   foreach ($tool in $Tools) {
     Wire-FigmaToTool $tool
+  }
+}
+
+function Wire-BrowserMcpToTool([string]$Tool) {
+  switch ($Tool) {
+    'opencode' { Configure-OpenCodeBrowserMcp; return }
+    'claude-code' { Configure-ClaudeCodeBrowserMcp; return }
+    default {
+      Warn "No Browser MCP wiring strategy is defined for $Tool"
+      return
+    }
+  }
+}
+
+function Wire-BrowserMcpToTools([string[]]$Tools) {
+  foreach ($tool in $Tools) {
+    Wire-BrowserMcpToTool $tool
   }
 }
 
@@ -1216,6 +1388,7 @@ function Verify-McpStatic([string[]]$Tools) {
 
   $escapedServerName = [regex]::Escape("`"$($script:Context7ServerName)`"")
   $escapedFigmaName = [regex]::Escape("`"$($script:FigmaServerName)`"")
+  $escapedBrowserName = [regex]::Escape("`"$($script:BrowserMcpServerName)`"")
   $escapedUrl = [regex]::Escape($script:Context7Url)
   foreach ($tool in $Tools) {
     switch ($tool) {
@@ -1234,6 +1407,11 @@ function Verify-McpStatic([string[]]$Tools) {
             Report-VerificationCheck 'FAIL' 'mcp-figma/opencode' "OpenCode config missing $($script:FigmaServerName)"
           }
         }
+        if ($content -and ($content -match $escapedBrowserName) -and ($content -match '"type":\s*"local"')) {
+          Report-VerificationCheck 'PASS' 'mcp-browser/opencode' "OpenCode config contains a local $($script:BrowserMcpServerName) server"
+        } else {
+          Report-VerificationCheck 'FAIL' 'mcp-browser/opencode' "OpenCode config missing $($script:BrowserMcpServerName)"
+        }
         continue
       }
       'claude-code' {
@@ -1243,6 +1421,18 @@ function Verify-McpStatic([string[]]$Tools) {
           Report-VerificationCheck 'PASS' 'mcp/claude-code' "Claude Code config contains $($script:Context7ServerName)"
         } else {
           Report-VerificationCheck 'FAIL' 'mcp/claude-code' "Claude Code config missing $($script:Context7ServerName)"
+        }
+        if ($script:Options.EnableFigma) {
+          if (($content -and ($content -match $escapedFigmaName)) -or ((Test-CommandExists 'claude') -and (Invoke-CaptureCommandOutput @('claude', 'mcp', 'list')).Output -match [regex]::Escape($script:FigmaServerName))) {
+            Report-VerificationCheck 'PASS' 'mcp-figma/claude-code' "Claude Code includes $($script:FigmaServerName)"
+          } else {
+            Report-VerificationCheck 'FAIL' 'mcp-figma/claude-code' "Claude Code missing $($script:FigmaServerName)"
+          }
+        }
+        if ($content -and ($content -match $escapedBrowserName)) {
+          Report-VerificationCheck 'PASS' 'mcp-browser/claude-code' "Claude Code config contains $($script:BrowserMcpServerName)"
+        } else {
+          Report-VerificationCheck 'FAIL' 'mcp-browser/claude-code' "Claude Code config missing $($script:BrowserMcpServerName)"
         }
         continue
       }
@@ -1390,6 +1580,14 @@ function Verify-McpSmoke([string[]]$Tools) {
               Report-VerificationCheck 'FAIL' 'mcp-cli-figma/opencode' "unable to query opencode mcp list for $($script:FigmaServerName)"
             }
           }
+          $escapedBrowserCliName = [regex]::Escape($script:BrowserMcpServerName)
+          if ($result.Success -and $result.Output -match $escapedBrowserCliName) {
+            Report-VerificationCheck 'PASS' 'mcp-cli-browser/opencode' "opencode mcp list included $($script:BrowserMcpServerName)"
+          } elseif ($result.Success) {
+            Report-VerificationCheck 'FAIL' 'mcp-cli-browser/opencode' "opencode mcp list did not include $($script:BrowserMcpServerName)"
+          } else {
+            Report-VerificationCheck 'FAIL' 'mcp-cli-browser/opencode' "unable to query opencode mcp list for $($script:BrowserMcpServerName)"
+          }
         }
       }
       'claude-code' {
@@ -1403,6 +1601,24 @@ function Verify-McpSmoke([string[]]$Tools) {
             Report-VerificationCheck 'FAIL' 'mcp-cli/claude-code' "claude mcp list did not include $($script:Context7ServerName)"
           } else {
             Report-VerificationCheck 'FAIL' 'mcp-cli/claude-code' 'unable to query claude mcp list'
+          }
+          if ($script:Options.EnableFigma) {
+            $escapedFigmaCliName = [regex]::Escape($script:FigmaServerName)
+            if ($result.Success -and $result.Output -match $escapedFigmaCliName) {
+              Report-VerificationCheck 'PASS' 'mcp-cli-figma/claude-code' "claude mcp list included $($script:FigmaServerName)"
+            } elseif ($result.Success) {
+              Report-VerificationCheck 'FAIL' 'mcp-cli-figma/claude-code' "claude mcp list did not include $($script:FigmaServerName)"
+            } else {
+              Report-VerificationCheck 'FAIL' 'mcp-cli-figma/claude-code' "unable to query claude mcp list for $($script:FigmaServerName)"
+            }
+          }
+          $escapedBrowserCliName = [regex]::Escape($script:BrowserMcpServerName)
+          if ($result.Success -and $result.Output -match $escapedBrowserCliName) {
+            Report-VerificationCheck 'PASS' 'mcp-cli-browser/claude-code' "claude mcp list included $($script:BrowserMcpServerName)"
+          } elseif ($result.Success) {
+            Report-VerificationCheck 'FAIL' 'mcp-cli-browser/claude-code' "claude mcp list did not include $($script:BrowserMcpServerName)"
+          } else {
+            Report-VerificationCheck 'FAIL' 'mcp-cli-browser/claude-code' "unable to query claude mcp list for $($script:BrowserMcpServerName)"
           }
         }
       }
@@ -1470,6 +1686,10 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "  1. Open Claude Code."
         Note "  2. Run in chat: /mcp"
         Note "     Confirm $($script:Context7ServerName) is connected."
+        if ($script:Options.EnableFigma) {
+          Note "     Confirm $($script:FigmaServerName) is listed. Authenticate it from /mcp if prompted."
+        }
+        Note "     Confirm $($script:BrowserMcpServerName) is listed after you install/connect the browser extension."
         Note "  3. Confirm installed skills include: $installedSkills"
         Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
@@ -1481,11 +1701,13 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         if ($script:Options.EnableFigma) {
           Note "  3. Run in chat: Use Figma to inspect the current selection."
           Note "     Confirm $($script:FigmaServerName) is listed and authenticated in OpenCode MCP settings."
+          Note "     Confirm $($script:BrowserMcpServerName) is listed after you install/connect the browser extension."
           Note "  4. Confirm installed skills include: $installedSkills"
           Note "  5. Prompt in chat: Run the test-skill skill."
         } else {
-          Note "  3. Confirm installed skills include: $installedSkills"
-          Note "  4. Prompt in chat: Run the test-skill skill."
+          Note "  3. Confirm $($script:BrowserMcpServerName) is listed after you install/connect the browser extension."
+          Note "  4. Confirm installed skills include: $installedSkills"
+          Note "  5. Prompt in chat: Run the test-skill skill."
         }
         Note "     Expected: `"$skillResponse`""
       }
@@ -1726,6 +1948,10 @@ function Main([string[]]$CliArgs) {
       Install-FigmaServer
       Wire-FigmaToTools $validatedTools
     }
+    if (Test-SelectedToolsSupportBrowserMcp $validatedTools) {
+      Install-BrowserMcpServer
+      Wire-BrowserMcpToTools $validatedTools
+    }
   } else {
     Log 'Skipping MCP installation'
   }
@@ -1750,11 +1976,15 @@ function Main([string[]]$CliArgs) {
   Log 'Done'
   Note "$(Format-Label 'Configured tools:') $(Format-Value (Join-Items ', ' $validatedTools))"
   Note "$(Format-Label 'Skill sources:') $(Format-Value (Join-Items ', ' $script:SkillSources))"
-  if ($script:Options.EnableFigma) {
-    Note "$(Format-Label 'MCP servers:') $(Format-Value "$($script:Context7ServerName), $($script:FigmaServerName)")"
-  } else {
-    Note "$(Format-Label 'MCP server:') $(Format-Value $script:Context7ServerName)"
+  $configuredServers = New-Object System.Collections.Generic.List[string]
+  $configuredServers.Add($script:Context7ServerName)
+  if ($script:Options.EnableFigma -and (Test-SelectedToolsSupportFigma $validatedTools)) {
+    $configuredServers.Add($script:FigmaServerName)
   }
+  if (Test-SelectedToolsSupportBrowserMcp $validatedTools) {
+    $configuredServers.Add($script:BrowserMcpServerName)
+  }
+  Note "$(Format-Label 'MCP servers:') $(Format-Value (Join-Items ', ' $configuredServers))"
   Note "$(Format-Label 'Log file:') $(Format-Value $script:Options.LogFile)"
 }
 

@@ -8,6 +8,9 @@ ensure_install_globals() {
   : "${FIGMA_URL:?FIGMA_URL must be set}"
   : "${FIGMA_REGISTER_URL:?FIGMA_REGISTER_URL must be set}"
   : "${FIGMA_OPENCODE_REDIRECT_URI:?FIGMA_OPENCODE_REDIRECT_URI must be set}"
+  : "${FIGMA_CLAUDE_CODE_REDIRECT_URI:?FIGMA_CLAUDE_CODE_REDIRECT_URI must be set}"
+  : "${BROWSER_MCP_SERVER_NAME:?BROWSER_MCP_SERVER_NAME must be set}"
+  : "${BROWSER_MCP_PACKAGE:?BROWSER_MCP_PACKAGE must be set}"
   ((${#SKILL_SOURCES[@]} > 0)) || die "SKILL_SOURCES must not be empty"
   ((${#SKILL_NAMES[@]} > 0)) || die "SKILL_NAMES must not be empty"
   ((${#SKILL_SOURCES[@]} == ${#SKILL_NAMES[@]})) || die "SKILL_SOURCES and SKILL_NAMES must stay in sync"
@@ -123,6 +126,19 @@ install_figma_server() {
   fi
 
   note "Figma MCP is only wired for tools with a documented native OAuth/browser flow"
+}
+
+install_browser_server() {
+  ensure_install_globals
+
+  log "Preparing Browser MCP configuration"
+
+  if (( DRY_RUN )); then
+    note "Would configure supported tools with a local Browser MCP server entry for '$BROWSER_MCP_SERVER_NAME'"
+    return 0
+  fi
+
+  note "Browser MCP server entries are wired directly for supported tools; the browser extension still must be installed manually"
 }
 
 write_context7_json_config() {
@@ -489,6 +505,274 @@ with open(path, "w", encoding="utf-8") as f:
 PY
 }
 
+write_browser_opencode_json_config() {
+  local path="$1"
+
+  TARGET_PATH="$path" BROWSER_MCP_SERVER_NAME="$BROWSER_MCP_SERVER_NAME" BROWSER_MCP_PACKAGE="$BROWSER_MCP_PACKAGE" python3 - <<'PY'
+import json
+import os
+import shutil
+import time
+
+
+def strip_jsonc(text: str) -> str:
+    result = []
+    in_string = False
+    string_char = ""
+    escaped = False
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
+                result.append(ch)
+            i += 1
+            continue
+
+        if in_block_comment:
+            if ch == "*" and nxt == "/":
+                in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+
+        if in_string:
+            result.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == string_char:
+                in_string = False
+            i += 1
+            continue
+
+        if ch in ('"', "'"):
+            in_string = True
+            string_char = ch
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "/":
+            in_line_comment = True
+            i += 2
+            continue
+
+        if ch == "/" and nxt == "*":
+            in_block_comment = True
+            i += 2
+            continue
+
+        result.append(ch)
+        i += 1
+
+    cleaned = "".join(result)
+    compact = []
+    in_string = False
+    string_char = ""
+    escaped = False
+    i = 0
+    while i < len(cleaned):
+        ch = cleaned[i]
+        if in_string:
+            compact.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == string_char:
+                in_string = False
+            i += 1
+            continue
+        if ch in ('"', "'"):
+            in_string = True
+            string_char = ch
+            compact.append(ch)
+            i += 1
+            continue
+        if ch == ",":
+            j = i + 1
+            while j < len(cleaned) and cleaned[j] in " \t\r\n":
+                j += 1
+            if j < len(cleaned) and cleaned[j] in "]}":
+                i += 1
+                continue
+        compact.append(ch)
+        i += 1
+    return "".join(compact)
+
+
+path = os.path.expanduser(os.environ["TARGET_PATH"])
+server_name = os.environ["BROWSER_MCP_SERVER_NAME"]
+package = os.environ["BROWSER_MCP_PACKAGE"]
+
+parent = os.path.dirname(path)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+
+data = {}
+if os.path.exists(path):
+    shutil.copy2(path, f"{path}.bak.{time.time_ns()}")
+    with open(path, "r", encoding="utf-8") as f:
+        raw = strip_jsonc(f.read()).strip()
+    if raw:
+        data = json.loads(raw)
+
+data.setdefault("$schema", "https://opencode.ai/config.json")
+data.setdefault("mcp", {})
+data["mcp"][server_name] = {
+    "enabled": True,
+    "type": "local",
+    "command": ["npx", "-y", package],
+}
+
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+}
+
+write_browser_claude_code_json_config() {
+  local path="$1"
+
+  TARGET_PATH="$path" BROWSER_MCP_SERVER_NAME="$BROWSER_MCP_SERVER_NAME" BROWSER_MCP_PACKAGE="$BROWSER_MCP_PACKAGE" python3 - <<'PY'
+import json
+import os
+import shutil
+import time
+
+
+def strip_jsonc(text: str) -> str:
+    result = []
+    in_string = False
+    string_char = ""
+    escaped = False
+    in_line_comment = False
+    in_block_comment = False
+    i = 0
+
+    while i < len(text):
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
+                result.append(ch)
+            i += 1
+            continue
+
+        if in_block_comment:
+            if ch == "*" and nxt == "/":
+                in_block_comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+
+        if in_string:
+            result.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == string_char:
+                in_string = False
+            i += 1
+            continue
+
+        if ch in ('"', "'"):
+            in_string = True
+            string_char = ch
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch == "/" and nxt == "/":
+            in_line_comment = True
+            i += 2
+            continue
+
+        if ch == "/" and nxt == "*":
+            in_block_comment = True
+            i += 2
+            continue
+
+        result.append(ch)
+        i += 1
+
+    cleaned = "".join(result)
+    compact = []
+    in_string = False
+    string_char = ""
+    escaped = False
+    i = 0
+    while i < len(cleaned):
+        ch = cleaned[i]
+        if in_string:
+            compact.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == string_char:
+                in_string = False
+            i += 1
+            continue
+        if ch in ('"', "'"):
+            in_string = True
+            string_char = ch
+            compact.append(ch)
+            i += 1
+            continue
+        if ch == ",":
+            j = i + 1
+            while j < len(cleaned) and cleaned[j] in " \t\r\n":
+                j += 1
+            if j < len(cleaned) and cleaned[j] in "]}":
+                i += 1
+                continue
+        compact.append(ch)
+        i += 1
+    return "".join(compact)
+
+
+path = os.path.expanduser(os.environ["TARGET_PATH"])
+server_name = os.environ["BROWSER_MCP_SERVER_NAME"]
+package = os.environ["BROWSER_MCP_PACKAGE"]
+
+parent = os.path.dirname(path)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+
+data = {}
+if os.path.exists(path):
+    shutil.copy2(path, f"{path}.bak.{time.time_ns()}")
+    with open(path, "r", encoding="utf-8") as f:
+        raw = strip_jsonc(f.read()).strip()
+    if raw:
+        data = json.loads(raw)
+
+data.setdefault("mcpServers", {})
+data["mcpServers"][server_name] = {
+    "command": "npx",
+    "args": ["-y", package],
+}
+
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+}
+
 register_figma_opencode_oauth_client() {
   ensure_install_globals
 
@@ -551,6 +835,68 @@ ensure_figma_opencode_credentials() {
   register_figma_opencode_oauth_client
 }
 
+register_figma_claude_code_oauth_client() {
+  ensure_install_globals
+
+  local response client_id client_secret
+
+  response="$(capture_cmd curl -sS -X POST "$FIGMA_REGISTER_URL" -H "Content-Type: application/json" -d '{
+      "client_name": "Claude Code (figma)",
+      "redirect_uris": ["http://localhost:19876/callback"],
+      "grant_types": ["authorization_code", "refresh_token"],
+      "response_types": ["code"],
+      "token_endpoint_auth_method": "none"
+    }')" || die "Failed to register Figma OAuth client for Claude Code"
+
+  client_id="$(RESPONSE_JSON="$response" python3 - <<'PY'
+import json
+import os
+
+raw = os.environ.get("RESPONSE_JSON", "")
+try:
+    data = json.loads(raw)
+except Exception:
+    print("")
+else:
+    print(data.get("client_id", ""))
+PY
+)"
+  client_secret="$(RESPONSE_JSON="$response" python3 - <<'PY'
+import json
+import os
+
+raw = os.environ.get("RESPONSE_JSON", "")
+try:
+    data = json.loads(raw)
+except Exception:
+    print("")
+else:
+    print(data.get("client_secret", ""))
+PY
+)"
+
+  [[ -n "$client_id" ]] || die "Figma OAuth registration response did not include client_id. Raw response: $response"
+  [[ -n "$client_secret" ]] || die "Figma OAuth registration response did not include client_secret. Raw response: $response"
+
+  FIGMA_CLIENT_ID_INPUT="$client_id"
+  FIGMA_CLIENT_SECRET_INPUT="$client_secret"
+
+  note "Registered a Figma OAuth client for Claude Code using callback $FIGMA_CLAUDE_CODE_REDIRECT_URI"
+}
+
+ensure_figma_claude_code_credentials() {
+  ensure_install_globals
+  if [[ -n "${FIGMA_CLIENT_ID_INPUT:-}" && -n "${FIGMA_CLIENT_SECRET_INPUT:-}" ]]; then
+    return 0
+  fi
+
+  if ! has_cmd curl; then
+    die "curl is required to register the Figma OAuth client for Claude Code"
+  fi
+
+  register_figma_claude_code_oauth_client
+}
+
 configure_figma_opencode() {
   ensure_install_globals
   local client_id="$1"
@@ -566,6 +912,68 @@ configure_figma_opencode() {
   [[ -n "$client_secret" ]] || die "Cannot configure OpenCode Figma MCP without client_secret"
 
   write_figma_opencode_json_config "~/.config/opencode/opencode.json" "$client_id" "$client_secret" || die "Failed to configure OpenCode for Figma MCP"
+}
+
+configure_figma_claude_code() {
+  ensure_install_globals
+  local client_id="$1"
+  local client_secret="$2"
+
+  log "Configuring Claude Code with direct Figma MCP"
+  if (( DRY_RUN )); then
+    note "Would add a Claude Code Figma MCP entry with pre-registered OAuth credentials"
+    return 0
+  fi
+
+  [[ -n "$client_id" ]] || die "Cannot configure Claude Code Figma MCP without client_id"
+  [[ -n "$client_secret" ]] || die "Cannot configure Claude Code Figma MCP without client_secret"
+
+  if ! has_cmd claude; then
+    warn "Claude executable not found; skipping automatic Claude Code Figma configuration"
+    return 0
+  fi
+
+  capture_cmd claude mcp remove "$FIGMA_SERVER_NAME" >/dev/null || true
+  local config_json
+  config_json=$(python3 - <<'PY'
+import json
+
+print(json.dumps({
+    "type": "http",
+    "url": "https://mcp.figma.com/mcp",
+    "oauth": {
+        "clientId": "__CLIENT_ID__",
+        "callbackPort": 19876,
+    },
+}))
+PY
+)
+  config_json="${config_json/__CLIENT_ID__/$client_id}"
+  MCP_CLIENT_SECRET="$client_secret" run_cmd claude mcp add-json --scope user "$FIGMA_SERVER_NAME" "$config_json" --client-secret
+}
+
+configure_browser_opencode() {
+  ensure_install_globals
+
+  log "Configuring OpenCode with Browser MCP"
+  if (( DRY_RUN )); then
+    note "Would update ~/.config/opencode/opencode.json with a Browser MCP local entry"
+    return 0
+  fi
+
+  write_browser_opencode_json_config "~/.config/opencode/opencode.json" || die "Failed to configure OpenCode for Browser MCP"
+}
+
+configure_browser_claude_code() {
+  ensure_install_globals
+
+  log "Configuring Claude Code with Browser MCP"
+  if (( DRY_RUN )); then
+    note "Would update ~/.claude.json with a Browser MCP local entry"
+    return 0
+  fi
+
+  write_browser_claude_code_json_config "~/.claude.json" || die "Failed to configure Claude Code for Browser MCP"
 }
 
 clear_figma_opencode_auth_cache() {
@@ -832,6 +1240,14 @@ wire_figma_to_tool() {
       configure_figma_opencode "$client_id" "$client_secret"
       authenticate_figma_opencode
       ;;
+    claude-code)
+      if [[ -z "$client_id" || -z "$client_secret" ]]; then
+        ensure_figma_claude_code_credentials
+        client_id="$FIGMA_CLIENT_ID_INPUT"
+        client_secret="$FIGMA_CLIENT_SECRET_INPUT"
+      fi
+      configure_figma_claude_code "$client_id" "$client_secret"
+      ;;
     github-copilot)
       warn "Figma MCP is not wired automatically for GitHub Copilot here; use a tool with a native CLI OAuth flow"
       ;;
@@ -849,5 +1265,30 @@ wire_figma_to_tools() {
   local tool
   for tool in "$@"; do
     wire_figma_to_tool "$tool" "$client_id" "$client_secret"
+  done
+}
+
+wire_browser_to_tool() {
+  ensure_install_globals
+  local tool="$1"
+
+  case "$tool" in
+    opencode)
+      configure_browser_opencode
+      ;;
+    claude-code)
+      configure_browser_claude_code
+      ;;
+    *)
+      warn "No Browser MCP wiring strategy is defined for $tool"
+      ;;
+  esac
+}
+
+wire_browser_to_tools() {
+  ensure_install_globals
+  local tool
+  for tool in "$@"; do
+    wire_browser_to_tool "$tool"
   done
 }
