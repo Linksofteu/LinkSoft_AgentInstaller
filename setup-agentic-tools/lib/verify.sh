@@ -7,8 +7,8 @@ VERIFY_SKIP_COUNT=0
 VERIFY_FAILED_LABELS=()
 
 ensure_verify_globals() {
-  : "${SKILL_NAME:?SKILL_NAME must be set}"
   : "${CONTEXT7_SERVER_NAME:?CONTEXT7_SERVER_NAME must be set}"
+  ((${#SKILL_NAMES[@]} > 0)) || die "SKILL_NAMES must not be empty"
 }
 
 reset_verification_counts() {
@@ -42,37 +42,28 @@ report_verification_check() {
 verify_skills_static() {
   log "Static verification: skills"
 
-  local tool skill_paths found_path path resolved_path
+  local tool skill_paths path
   for tool in "$@"; do
     if ! skill_paths="$(tool_skill_static_paths "$tool" 2>/dev/null)"; then
       report_verification_check "SKIP" "skills/$tool" "no documented static skill path mapping"
       continue
     fi
 
-    found_path=""
+    local -a missing_paths=()
+    local found_count=0
     while IFS= read -r path; do
       [[ -z "$path" ]] && continue
       if [[ -f "$path" ]]; then
-        found_path="$path"
-        break
+        found_count=$((found_count + 1))
+      else
+        missing_paths+=("$path")
       fi
     done <<< "$skill_paths"
 
-    if [[ -n "$found_path" ]]; then
-      if [[ -L "$found_path" ]]; then
-        resolved_path="$(readlink -f "$found_path" 2>/dev/null || true)"
-        if [[ -n "$resolved_path" ]]; then
-          report_verification_check "PASS" "skills/$tool" "found symlink $found_path -> $resolved_path"
-        else
-          report_verification_check "PASS" "skills/$tool" "found symlink $found_path"
-        fi
-      else
-        report_verification_check "PASS" "skills/$tool" "found $found_path"
-      fi
+    if ((${#missing_paths[@]} == 0)); then
+      report_verification_check "PASS" "skills/$tool" "found all ${found_count} expected skill files"
     else
-      local joined_paths="${skill_paths//$'\n'/,}"
-      joined_paths="${joined_paths%,}"
-      report_verification_check "FAIL" "skills/$tool" "missing expected skill file in: $joined_paths"
+      report_verification_check "FAIL" "skills/$tool" "missing expected skill file in: $(join_by ', ' "${missing_paths[@]}")"
     fi
   done
 }
@@ -184,17 +175,25 @@ verify_skills_smoke() {
     local hint=""
     hint="$(tool_native_skills_check_hint "$tool" 2>/dev/null || true)"
     if output="$(capture_cmd npx -y skills ls -g -a "$agent" || true)"; then
-      if grep -q "$SKILL_NAME" <<<"$output"; then
+      local -a missing_skills=()
+      local skill_name
+      for skill_name in "${SKILL_NAMES[@]}"; do
+        if ! grep -q "$skill_name" <<<"$output"; then
+          missing_skills+=("$skill_name")
+        fi
+      done
+
+      if ((${#missing_skills[@]} == 0)); then
         if [[ -n "$hint" ]]; then
-          report_verification_check "PASS" "skills-cli/$tool" "skills.sh fallback for $agent included $SKILL_NAME; native check available manually via $hint"
+          report_verification_check "PASS" "skills-cli/$tool" "skills.sh fallback for $agent included $(join_by ', ' "${SKILL_NAMES[@]}"); native check available manually via $hint"
         else
-          report_verification_check "PASS" "skills-cli/$tool" "skills.sh fallback for $agent included $SKILL_NAME"
+          report_verification_check "PASS" "skills-cli/$tool" "skills.sh fallback for $agent included $(join_by ', ' "${SKILL_NAMES[@]}")"
         fi
       else
         if [[ -n "$hint" ]]; then
-          report_verification_check "FAIL" "skills-cli/$tool" "skills.sh fallback for $agent did not include $SKILL_NAME; native check available manually via $hint"
+          report_verification_check "FAIL" "skills-cli/$tool" "skills.sh fallback for $agent is missing $(join_by ', ' "${missing_skills[@]}"); native check available manually via $hint"
         else
-          report_verification_check "FAIL" "skills-cli/$tool" "skills.sh fallback for $agent did not include $SKILL_NAME"
+          report_verification_check "FAIL" "skills-cli/$tool" "skills.sh fallback for $agent is missing $(join_by ', ' "${missing_skills[@]}")"
         fi
       fi
     else

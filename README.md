@@ -4,7 +4,7 @@ LinkSoft_AgentInstaller is a cross-platform setup utility for installing and wir
 
 Today, the script focuses on:
 
-- installing the LinkSoft `test-skill`
+- installing the default LinkSoft skills: `test-skill`, `ddd-application-slice`, and `creating-linksoft-skills`
 - wiring the Context7 MCP server directly into supported tools
 - running static and smoke verification checks where supported
 
@@ -24,7 +24,7 @@ When run, it will:
 
 1. detect supported tools already present on the machine
 2. let you add or choose the tools you want to configure
-3. install the LinkSoft test skill via `npx skills`
+3. install the default LinkSoft skills via `npx skills`
 4. check whether `openspec` is installed and, if missing, offer to install it globally via `npm`
 5. prepare a direct remote MCP configuration for `context7`
 6. write Context7 into each supported tool's config file or settings path
@@ -33,8 +33,14 @@ When run, it will:
 
 ## Current defaults
 
-- Skill source: `Linksofteu/LinkSoft_Skills@test-skill`
-- Skill name: `test-skill`
+- Skill sources:
+  - `Linksofteu/LinkSoft_Skills@test-skill`
+  - `Linksofteu/LinkSoft_Skills@ddd-application-slice`
+  - `Linksofteu/LinkSoft_Skills@creating-linksoft-skills`
+- Skill names:
+  - `test-skill`
+  - `ddd-application-slice`
+  - `creating-linksoft-skills`
 - MCP server name: `context7`
 - MCP server URL: `https://mcp.context7.com/mcp`
 
@@ -256,6 +262,8 @@ Skills are installed through:
 
 ```bash
 npx -y skills add Linksofteu/LinkSoft_Skills@test-skill -g -y
+npx -y skills add Linksofteu/LinkSoft_Skills@ddd-application-slice -g -y
+npx -y skills add Linksofteu/LinkSoft_Skills@creating-linksoft-skills -g -y
 ```
 
 The script maps selected tool ids to the correct skills agent target where possible.
@@ -266,19 +274,19 @@ The table below lists where the installed skill file lands after `npx skills` ru
 
 | Tool id | Skill file path |
 |---------|-----------------|
-| `opencode` | `~/.agents/skills/test-skill/SKILL.md` |
-| `codex` | `~/.agents/skills/test-skill/SKILL.md` |
-| `github-copilot-cli` | `~/.agents/skills/test-skill/SKILL.md` |
-| `github-copilot` | `~/.agents/skills/test-skill/SKILL.md` |
-| `cline` | `~/.agents/skills/test-skill/SKILL.md` |
-| `cursor` | `~/.agents/skills/test-skill/SKILL.md` |
-| `gemini-cli` | `~/.agents/skills/test-skill/SKILL.md` |
-| `vscode` | `~/.agents/skills/test-skill/SKILL.md` |
-| `claude-code` | `~/.claude/skills/test-skill/SKILL.md` |
-| `windsurf` | `~/.codeium/windsurf/skills/test-skill/SKILL.md` |
-| `continue` | `~/.continue/skills/test-skill/SKILL.md` |
-| `goose` | `~/.config/goose/skills/test-skill/SKILL.md` |
-| `roo` | `~/.roo/skills/test-skill/SKILL.md` |
+| `opencode` | `~/.agents/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `codex` | `~/.agents/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `github-copilot-cli` | `~/.agents/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `github-copilot` | `~/.agents/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `cline` | `~/.agents/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `cursor` | `~/.agents/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `gemini-cli` | `~/.agents/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `vscode` | `~/.agents/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `claude-code` | `~/.claude/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `windsurf` | `~/.codeium/windsurf/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `continue` | `~/.continue/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `goose` | `~/.config/goose/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
+| `roo` | `~/.roo/skills/{test-skill,ddd-application-slice,creating-linksoft-skills}/SKILL.md` |
 
 ### Context7 MCP wiring
 
@@ -389,10 +397,10 @@ You can override it:
 
 ## Notes and limitations
 
-- The current script is centered on installing the LinkSoft `test-skill`, not an arbitrary skill catalog.
+- The current script installs a fixed default LinkSoft skill set rather than an arbitrary skill catalog.
 - Detection is based on known config directories and/or executables for supported tools.
 - Verification coverage differs by tool because not every tool exposes the same CLI or config surface.
-- Some configuration files are backed up before being rewritten.
+- Any existing config file the installer modifies is backed up first as a sibling `.bak.<epoch>` file, and those backups are kept after the installer finishes.
 
 ## License
 

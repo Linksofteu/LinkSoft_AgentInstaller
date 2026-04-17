@@ -5,8 +5,16 @@ $ErrorActionPreference = 'Stop'
 
 $script:Version = '1.1.0'
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$script:SkillSource = 'Linksofteu/LinkSoft_Skills@test-skill'
-$script:SkillName = 'test-skill'
+$script:SkillSources = @(
+  'Linksofteu/LinkSoft_Skills@test-skill',
+  'Linksofteu/LinkSoft_Skills@ddd-application-slice',
+  'Linksofteu/LinkSoft_Skills@creating-linksoft-skills'
+)
+$script:SkillNames = @(
+  'test-skill',
+  'ddd-application-slice',
+  'creating-linksoft-skills'
+)
 $script:Context7ServerName = 'context7'
 $script:Context7Url = 'https://mcp.context7.com/mcp'
 $script:DefaultLogFile = Join-Path $script:ScriptDir 'setup-agentic-tools.log'
@@ -182,22 +190,25 @@ function Get-GeminiSettingsPath { Join-Path (Join-Path (Get-HomePath) '.gemini')
 
 function Get-ToolSkillStaticPaths([string]$Tool) {
   $userHome = Get-HomePath
+  $basePath = $null
   switch ($Tool) {
-    'opencode' { return @((Join-Path $userHome ".agents\skills\$($script:SkillName)\SKILL.md")) }
-    'codex' { return @((Join-Path $userHome ".agents\skills\$($script:SkillName)\SKILL.md")) }
-    'github-copilot-cli' { return @((Join-Path $userHome ".agents\skills\$($script:SkillName)\SKILL.md")) }
-    'github-copilot' { return @((Join-Path $userHome ".agents\skills\$($script:SkillName)\SKILL.md")) }
-    'cline' { return @((Join-Path $userHome ".agents\skills\$($script:SkillName)\SKILL.md")) }
-    'cursor' { return @((Join-Path $userHome ".agents\skills\$($script:SkillName)\SKILL.md")) }
-    'gemini-cli' { return @((Join-Path $userHome ".agents\skills\$($script:SkillName)\SKILL.md")) }
-    'claude-code' { return @((Join-Path $userHome ".claude\skills\$($script:SkillName)\SKILL.md")) }
-    'windsurf' { return @((Join-Path $userHome ".codeium\windsurf\skills\$($script:SkillName)\SKILL.md")) }
-    'continue' { return @((Join-Path $userHome ".continue\skills\$($script:SkillName)\SKILL.md")) }
-    'goose' { return @((Join-Path $userHome ".config\goose\skills\$($script:SkillName)\SKILL.md")) }
-    'roo' { return @((Join-Path $userHome ".roo\skills\$($script:SkillName)\SKILL.md")) }
-    'vscode' { return @((Join-Path $userHome ".agents\skills\$($script:SkillName)\SKILL.md")) }
+    'opencode' { $basePath = Join-Path $userHome '.agents\skills' }
+    'codex' { $basePath = Join-Path $userHome '.agents\skills' }
+    'github-copilot-cli' { $basePath = Join-Path $userHome '.agents\skills' }
+    'github-copilot' { $basePath = Join-Path $userHome '.agents\skills' }
+    'cline' { $basePath = Join-Path $userHome '.agents\skills' }
+    'cursor' { $basePath = Join-Path $userHome '.agents\skills' }
+    'gemini-cli' { $basePath = Join-Path $userHome '.agents\skills' }
+    'claude-code' { $basePath = Join-Path $userHome '.claude\skills' }
+    'windsurf' { $basePath = Join-Path $userHome '.codeium\windsurf\skills' }
+    'continue' { $basePath = Join-Path $userHome '.continue\skills' }
+    'goose' { $basePath = Join-Path $userHome '.config\goose\skills' }
+    'roo' { $basePath = Join-Path $userHome '.roo\skills' }
+    'vscode' { $basePath = Join-Path $userHome '.agents\skills' }
     default { return @() }
   }
+
+  return @($script:SkillNames | ForEach-Object { Join-Path $basePath ("{0}\SKILL.md" -f $_) })
 }
 
 function Get-SkillAgentForTool([string]$Tool) {
@@ -285,7 +296,7 @@ function Show-Usage {
   @"
 Usage: setup-agentic-tools.ps1 [options]
 
-Installs the LinkSoft test skill via npx skills, installs/configures Context7,
+Installs the default LinkSoft skills via npx skills, installs/configures Context7,
 then runs static and smoke verification where supported.
 
 Version: $($script:Version)
@@ -480,17 +491,19 @@ function Install-Skill([string[]]$SelectedTools) {
 
   Ensure-OpenSpec
 
-  $command = New-Object System.Collections.Generic.List[string]
-  foreach ($item in @('npx', '-y', 'skills', 'add', $script:SkillSource, '-g', '-y')) { $command.Add($item) }
-  if ($script:Options.CopySkills) { $command.Add('--copy') }
-  foreach ($agent in $skillAgents) {
-    $command.Add('-a')
-    $command.Add($agent)
-  }
+  for ($i = 0; $i -lt $script:SkillSources.Count; $i++) {
+    $command = New-Object System.Collections.Generic.List[string]
+    foreach ($item in @('npx', '-y', 'skills', 'add', $script:SkillSources[$i], '-g', '-y')) { $command.Add($item) }
+    if ($script:Options.CopySkills) { $command.Add('--copy') }
+    foreach ($agent in $skillAgents) {
+      $command.Add('-a')
+      $command.Add($agent)
+    }
 
-  Log 'Installing LinkSoft test skill'
-  Debug-Note ("skills.sh targets: {0}" -f (Join-Items ', ' $skillAgents))
-  [void](Invoke-ExternalCommand -Command ([string[]]$command))
+    Log ("Installing LinkSoft skill: {0}" -f $script:SkillNames[$i])
+    Debug-Note ("skills.sh targets: {0}" -f (Join-Items ', ' $skillAgents))
+    [void](Invoke-ExternalCommand -Command ([string[]]$command))
+  }
 }
 
 function Remove-JsonCommentsAndTrailingCommas([string]$Text) {
@@ -660,7 +673,7 @@ function Read-JsoncDocument([string]$Path) {
 
 function Backup-FileIfPresent([string]$Path) {
   if (Test-Path $Path) {
-    Copy-Item -Path $Path -Destination ("{0}.bak.{1}" -f $Path, [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) -Force
+    Copy-Item -Path $Path -Destination ("{0}.bak.{1}" -f $Path, [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) -Force
   }
 }
 
@@ -926,18 +939,20 @@ function Verify-SkillsStatic([string[]]$Tools) {
       continue
     }
 
-    $foundPath = $null
+    $missingPaths = New-Object System.Collections.Generic.List[string]
+    $foundCount = 0
     foreach ($path in $paths) {
       if (Test-Path $path) {
-        $foundPath = $path
-        break
+        $foundCount += 1
+      } else {
+        $missingPaths.Add($path) | Out-Null
       }
     }
 
-    if ($null -ne $foundPath) {
-      Report-VerificationCheck 'PASS' "skills/$tool" "found $foundPath"
+    if ($missingPaths.Count -eq 0) {
+      Report-VerificationCheck 'PASS' "skills/$tool" "found all $foundCount expected skill files"
     } else {
-      Report-VerificationCheck 'FAIL' "skills/$tool" ("missing expected skill file in: {0}" -f (Join-Items ', ' $paths))
+      Report-VerificationCheck 'FAIL' "skills/$tool" ("missing expected skill file in: {0}" -f (Join-Items ', ' $missingPaths))
     }
   }
 }
@@ -1069,12 +1084,13 @@ function Verify-SkillsSmoke([string[]]$Tools) {
     $hint = Get-NativeSkillsCheckHint $tool
     $result = Invoke-CaptureCommandOutput @('npx', '-y', 'skills', 'ls', '-g', '-a', $agent)
     if ($result.Success) {
-      if ($result.Output -match [regex]::Escape($script:SkillName)) {
-        $details = "skills.sh fallback for $agent included $($script:SkillName)"
+      $missingSkills = @($script:SkillNames | Where-Object { $result.Output -notmatch [regex]::Escape($_) })
+      if ($missingSkills.Count -eq 0) {
+        $details = "skills.sh fallback for $agent included $(Join-Items ', ' $script:SkillNames)"
         if (-not [string]::IsNullOrWhiteSpace($hint)) { $details += "; native check available manually via $hint" }
         Report-VerificationCheck 'PASS' "skills-cli/$tool" $details
       } else {
-        $details = "skills.sh fallback for $agent did not include $($script:SkillName)"
+        $details = "skills.sh fallback for $agent is missing $(Join-Items ', ' $missingSkills)"
         if (-not [string]::IsNullOrWhiteSpace($hint)) { $details += "; native check available manually via $hint" }
         Report-VerificationCheck 'FAIL' "skills-cli/$tool" $details
       }
@@ -1184,6 +1200,7 @@ function Write-MviHeader([string]$Tool) {
 function Print-ManualVerificationInstructions([string[]]$Tools) {
   Log 'Manual verification instructions'
   $skillResponse = 'I greet you from the world of skills, user! You shall use me skillfully.'
+  $installedSkills = Join-Items ', ' $script:SkillNames
   foreach ($tool in $Tools) {
     switch ($tool) {
       'claude-code' {
@@ -1191,14 +1208,16 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "  1. Open Claude Code."
         Note "  2. Run in chat: /mcp"
         Note "     Confirm $($script:Context7ServerName) is connected."
-        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  3. Confirm installed skills include: $installedSkills"
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'opencode' {
         Write-MviHeader $tool
         Note "  1. Open OpenCode."
         Note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
-        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  3. Confirm installed skills include: $installedSkills"
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'codex' {
@@ -1207,8 +1226,8 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "  2. Run in chat: /mcp"
         Note "     Confirm $($script:Context7ServerName) is connected."
         Note "  3. Run in chat: /skills"
-        Note "     Confirm $($script:SkillName) is listed."
-        Note "  4. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Confirm $installedSkills are listed."
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'gemini-cli' {
@@ -1216,7 +1235,8 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "  1. Open Gemini CLI."
         Note "  2. Run in chat: /mcp"
         Note "     Confirm $($script:Context7ServerName) is connected."
-        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  3. Confirm installed skills include: $installedSkills"
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'github-copilot-cli' {
@@ -1225,8 +1245,8 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "  2. Run in chat: /mcp"
         Note "     Confirm $($script:Context7ServerName) is listed."
         Note "  3. Run in chat: /skills list"
-        Note "     Confirm $($script:SkillName) is listed."
-        Note "  4. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Confirm $installedSkills are listed."
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'vscode' {
@@ -1236,7 +1256,8 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "     Confirm $($script:Context7ServerName) is listed."
         Note "  3. Open Copilot Chat in Agent mode."
         Note "     Confirm skill tools appear in the tools panel."
-        Note "  4. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  4. Confirm installed skills include: $installedSkills"
+        Note "  5. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'github-copilot' {
@@ -1247,7 +1268,8 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "     Confirm $($script:Context7ServerName) is listed."
         Note "  3. Open Copilot Chat in Agent mode."
         Note "     Confirm skill tools appear in the tools panel."
-        Note "  4. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  4. Confirm installed skills include: $installedSkills"
+        Note "  5. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'cline' {
@@ -1255,7 +1277,8 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "  1. Open Cline."
         Note "  2. Open MCP Servers panel."
         Note "     Confirm $($script:Context7ServerName) is listed and connected."
-        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  3. Confirm installed skills include: $installedSkills"
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'cursor' {
@@ -1263,7 +1286,8 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "  1. Open Cursor."
         Note "  2. Open Settings -> MCP."
         Note "     Confirm $($script:Context7ServerName) is listed."
-        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  3. Confirm installed skills include: $installedSkills"
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'windsurf' {
@@ -1271,7 +1295,8 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "  1. Open Windsurf."
         Note "  2. Open Cascade -> MCP panel."
         Note "     Confirm $($script:Context7ServerName) is listed."
-        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  3. Confirm installed skills include: $installedSkills"
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'roo' {
@@ -1279,21 +1304,24 @@ function Print-ManualVerificationInstructions([string[]]$Tools) {
         Note "  1. Open VS Code with Roo."
         Note "  2. Open MCP Servers panel."
         Note "     Confirm $($script:Context7ServerName) is listed and connected."
-        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  3. Confirm installed skills include: $installedSkills"
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'continue' {
         Write-MviHeader $tool
         Note "  1. Open VS Code with Continue."
         Note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
-        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  3. Confirm installed skills include: $installedSkills"
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
       'goose' {
         Write-MviHeader $tool
         Note "  1. Open Goose."
         Note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
-        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "  3. Confirm installed skills include: $installedSkills"
+        Note "  4. Prompt in chat: Run the test-skill skill."
         Note "     Expected: `"$skillResponse`""
       }
     }
@@ -1440,7 +1468,7 @@ function Main([string[]]$CliArgs) {
 
   Log 'Done'
   Note "$(Format-Label 'Configured tools:') $(Format-Value (Join-Items ', ' $validatedTools))"
-  Note "$(Format-Label 'Skill source:') $(Format-Value $script:SkillSource)"
+  Note "$(Format-Label 'Skill sources:') $(Format-Value (Join-Items ', ' $script:SkillSources))"
   Note "$(Format-Label 'MCP server:') $(Format-Value $script:Context7ServerName)"
   Note "$(Format-Label 'Log file:') $(Format-Value $script:Options.LogFile)"
 }

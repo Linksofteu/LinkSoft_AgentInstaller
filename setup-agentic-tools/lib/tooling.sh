@@ -125,27 +125,42 @@ collect_skill_agents() {
 
 tool_skill_static_paths() {
   local tool="$1"
+  local skill_name
   case "$tool" in
     opencode|codex|github-copilot-cli|github-copilot|cline|cursor|gemini-cli)
-      printf '%s/.agents/skills/%s/SKILL.md\n' "$HOME" "$SKILL_NAME"
+      for skill_name in "${SKILL_NAMES[@]}"; do
+        printf '%s/.agents/skills/%s/SKILL.md\n' "$HOME" "$skill_name"
+      done
       ;;
     claude-code)
-      printf '%s/.claude/skills/%s/SKILL.md\n' "$HOME" "$SKILL_NAME"
+      for skill_name in "${SKILL_NAMES[@]}"; do
+        printf '%s/.claude/skills/%s/SKILL.md\n' "$HOME" "$skill_name"
+      done
       ;;
     windsurf)
-      printf '%s/.codeium/windsurf/skills/%s/SKILL.md\n' "$HOME" "$SKILL_NAME"
+      for skill_name in "${SKILL_NAMES[@]}"; do
+        printf '%s/.codeium/windsurf/skills/%s/SKILL.md\n' "$HOME" "$skill_name"
+      done
       ;;
     continue)
-      printf '%s/.continue/skills/%s/SKILL.md\n' "$HOME" "$SKILL_NAME"
+      for skill_name in "${SKILL_NAMES[@]}"; do
+        printf '%s/.continue/skills/%s/SKILL.md\n' "$HOME" "$skill_name"
+      done
       ;;
     goose)
-      printf '%s/.config/goose/skills/%s/SKILL.md\n' "$HOME" "$SKILL_NAME"
+      for skill_name in "${SKILL_NAMES[@]}"; do
+        printf '%s/.config/goose/skills/%s/SKILL.md\n' "$HOME" "$skill_name"
+      done
       ;;
     roo)
-      printf '%s/.roo/skills/%s/SKILL.md\n' "$HOME" "$SKILL_NAME"
+      for skill_name in "${SKILL_NAMES[@]}"; do
+        printf '%s/.roo/skills/%s/SKILL.md\n' "$HOME" "$skill_name"
+      done
       ;;
     vscode)
-      printf '%s/.agents/skills/%s/SKILL.md\n' "$HOME" "$SKILL_NAME"
+      for skill_name in "${SKILL_NAMES[@]}"; do
+        printf '%s/.agents/skills/%s/SKILL.md\n' "$HOME" "$skill_name"
+      done
       ;;
     *)
       return 1
@@ -230,6 +245,7 @@ print_manual_verification_instructions() {
   log "Manual verification instructions"
   local tool
   local skill_response="I greet you from the world of skills, user! You shall use me skillfully."
+  local installed_skills="$(join_by ', ' "${SKILL_NAMES[@]}")"
   for tool in "$@"; do
     case "$tool" in
       claude-code)
@@ -237,14 +253,16 @@ print_manual_verification_instructions() {
         note "  1. Open Claude Code."
         note "  2. Run in chat: /mcp"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
-        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  3. Confirm installed skills include: ${installed_skills}"
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       opencode)
         _mvi_header "$tool"
         note "  1. Open OpenCode."
         note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
-        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  3. Confirm installed skills include: ${installed_skills}"
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       codex)
@@ -253,8 +271,8 @@ print_manual_verification_instructions() {
         note "  2. Run in chat: /mcp"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
         note "  3. Run in chat: /skills"
-        note "     Confirm ${SKILL_NAME} is listed."
-        note "  4. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Confirm ${installed_skills} are listed."
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       gemini-cli)
@@ -262,7 +280,8 @@ print_manual_verification_instructions() {
         note "  1. Open Gemini CLI."
         note "  2. Run in chat: /mcp"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
-        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  3. Confirm installed skills include: ${installed_skills}"
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       github-copilot-cli)
@@ -271,8 +290,8 @@ print_manual_verification_instructions() {
         note "  2. Run in chat: /mcp"
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
         note "  3. Run in chat: /skills list"
-        note "     Confirm ${SKILL_NAME} is listed."
-        note "  4. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Confirm ${installed_skills} are listed."
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       vscode)
@@ -282,7 +301,8 @@ print_manual_verification_instructions() {
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
         note "  3. Open Copilot Chat in Agent mode."
         note "     Confirm skill tools appear in the tools panel."
-        note "  4. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  4. Confirm installed skills include: ${installed_skills}"
+        note "  5. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       github-copilot)
@@ -293,7 +313,8 @@ print_manual_verification_instructions() {
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
         note "  3. Open Copilot Chat in Agent mode."
         note "     Confirm skill tools appear in the tools panel."
-        note "  4. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  4. Confirm installed skills include: ${installed_skills}"
+        note "  5. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       cline)
@@ -301,7 +322,8 @@ print_manual_verification_instructions() {
         note "  1. Open Cline."
         note "  2. Open MCP Servers panel."
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed and connected."
-        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  3. Confirm installed skills include: ${installed_skills}"
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       cursor)
@@ -309,7 +331,8 @@ print_manual_verification_instructions() {
         note "  1. Open Cursor."
         note "  2. Open Settings → MCP."
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
-        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  3. Confirm installed skills include: ${installed_skills}"
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       windsurf)
@@ -317,7 +340,8 @@ print_manual_verification_instructions() {
         note "  1. Open Windsurf."
         note "  2. Open Cascade → MCP panel."
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
-        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  3. Confirm installed skills include: ${installed_skills}"
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       roo)
@@ -325,21 +349,24 @@ print_manual_verification_instructions() {
         note "  1. Open VS Code with Roo."
         note "  2. Open MCP Servers panel."
         note "     Confirm ${CONTEXT7_SERVER_NAME} is listed and connected."
-        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  3. Confirm installed skills include: ${installed_skills}"
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       continue)
         _mvi_header "$tool"
         note "  1. Open VS Code with Continue."
         note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
-        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  3. Confirm installed skills include: ${installed_skills}"
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
       goose)
         _mvi_header "$tool"
         note "  1. Open Goose."
         note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
-        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "  3. Confirm installed skills include: ${installed_skills}"
+        note "  4. Prompt in chat: Run the test-skill skill."
         note "     Expected: \"${skill_response}\""
         ;;
     esac

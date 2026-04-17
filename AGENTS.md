@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository does
 
-LinkSoft_AgentInstaller is a cross-platform installer that wires the LinkSoft `test-skill` and the Context7 MCP server into multiple AI coding tools from a single entry point. It handles the fact that each tool stores skills and MCP config in different locations and formats.
+LinkSoft_AgentInstaller is a cross-platform installer that wires the default LinkSoft skills (`test-skill`, `ddd-application-slice`, and `creating-linksoft-skills`) and the Context7 MCP server into multiple AI coding tools from a single entry point. It handles the fact that each tool stores skills and MCP config in different locations and formats.
 
 ## Running the installer
 
@@ -50,7 +50,7 @@ The Bash implementation is split into a thin entrypoint and four sourced librari
 
 **Per-tool dispatch**: Tools with known config formats are wired directly by the installer. Bash uses embedded Python for JSON/TOML rewrites where convenient, and PowerShell uses native JSON helpers plus small text transforms for TOML.
 
-**Config file backup**: Before rewriting any JSON config, a timestamped `.bak.<epoch>` copy is created alongside the original.
+**Config file backup**: Before modifying any existing config file, a timestamped `.bak.<epoch>` copy is created alongside the original and is left in place after the script finishes.
 
 **Tool detection**: Each tool is detected by checking for a known config directory and/or executable. Detection is used to build the default tool list; users can override with `--tools` or extend with `--extra-tools`.
 

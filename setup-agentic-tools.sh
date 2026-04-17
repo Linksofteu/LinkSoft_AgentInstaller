@@ -14,8 +14,16 @@ source "$SCRIPT_DIR/setup-agentic-tools/lib/install.sh"
 # shellcheck source=setup-agentic-tools/lib/verify.sh
 source "$SCRIPT_DIR/setup-agentic-tools/lib/verify.sh"
 
-SKILL_SOURCE="Linksofteu/LinkSoft_Skills@test-skill"
-SKILL_NAME="test-skill"
+SKILL_SOURCES=(
+  "Linksofteu/LinkSoft_Skills@test-skill"
+  "Linksofteu/LinkSoft_Skills@ddd-application-slice"
+  "Linksofteu/LinkSoft_Skills@creating-linksoft-skills"
+)
+SKILL_NAMES=(
+  "test-skill"
+  "ddd-application-slice"
+  "creating-linksoft-skills"
+)
 CONTEXT7_SERVER_NAME="context7"
 CONTEXT7_URL="https://mcp.context7.com/mcp"
 DEFAULT_LOG_FILE="$SCRIPT_DIR/setup-agentic-tools.log"
@@ -36,7 +44,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [options]
 
-Installs the LinkSoft test skill via npx skills, installs/configures Context7,
+Installs the default LinkSoft skills via npx skills, installs/configures Context7,
 then runs static and smoke verification where supported.
 
 Version: $VERSION
@@ -281,7 +289,7 @@ main() {
 
   log "Done"
   note "$(format_label "Configured tools:") $(format_value "$(join_by ', ' "${validated_tools[@]}")")"
-  note "$(format_label "Skill source:") $(format_value "$SKILL_SOURCE")"
+  note "$(format_label "Skill sources:") $(format_value "$(join_by ', ' "${SKILL_SOURCES[@]}")")"
   note "$(format_label "MCP server:") $(format_value "$CONTEXT7_SERVER_NAME")"
   note "$(format_label "Log file:") $(format_value "$LOG_FILE")"
 }

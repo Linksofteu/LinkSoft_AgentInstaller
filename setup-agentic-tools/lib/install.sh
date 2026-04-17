@@ -2,9 +2,11 @@
 # Expects caller to enable strict mode (set -euo pipefail).
 
 ensure_install_globals() {
-  : "${SKILL_SOURCE:?SKILL_SOURCE must be set}"
   : "${CONTEXT7_SERVER_NAME:?CONTEXT7_SERVER_NAME must be set}"
   : "${CONTEXT7_URL:?CONTEXT7_URL must be set}"
+  ((${#SKILL_SOURCES[@]} > 0)) || die "SKILL_SOURCES must not be empty"
+  ((${#SKILL_NAMES[@]} > 0)) || die "SKILL_NAMES must not be empty"
+  ((${#SKILL_SOURCES[@]} == ${#SKILL_NAMES[@]})) || die "SKILL_SOURCES and SKILL_NAMES must stay in sync"
 }
 
 ensure_prereqs() {
@@ -58,17 +60,22 @@ install_skill() {
 
   ensure_openspec
 
-  local -a cmd=(npx -y skills add "$SKILL_SOURCE" -g -y)
-  (( COPY_SKILLS )) && cmd+=(--copy)
+  local i skill_source skill_name agent
+  for i in "${!SKILL_SOURCES[@]}"; do
+    skill_source="${SKILL_SOURCES[$i]}"
+    skill_name="${SKILL_NAMES[$i]}"
 
-  local agent
-  for agent in "${skill_agents[@]}"; do
-    cmd+=(-a "$agent")
+    local -a cmd=(npx -y skills add "$skill_source" -g -y)
+    (( COPY_SKILLS )) && cmd+=(--copy)
+
+    for agent in "${skill_agents[@]}"; do
+      cmd+=(-a "$agent")
+    done
+
+    log "Installing LinkSoft skill: $skill_name"
+    debug "skills.sh targets: $(join_by ', ' "${skill_agents[@]}")"
+    run_cmd "${cmd[@]}"
   done
-
-  log "Installing LinkSoft test skill"
-  debug "skills.sh targets: $(join_by ', ' "${skill_agents[@]}")"
-  run_cmd "${cmd[@]}"
 }
 
 install_context7_server() {
@@ -198,7 +205,7 @@ def strip_jsonc(text: str) -> str:
 def load_jsonc(path: str):
     data = {}
     if os.path.exists(path):
-        shutil.copy2(path, f"{path}.bak.{int(time.time())}")
+        shutil.copy2(path, f"{path}.bak.{time.time_ns()}")
         with open(path, "r", encoding="utf-8") as f:
             raw = strip_jsonc(f.read()).strip()
         if raw:
@@ -354,7 +361,7 @@ os.makedirs(os.path.dirname(path), exist_ok=True)
 
 content = ""
 if os.path.exists(path):
-    shutil.copy2(path, f"{path}.bak.{int(time.time())}")
+    shutil.copy2(path, f"{path}.bak.{time.time_ns()}")
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
 
