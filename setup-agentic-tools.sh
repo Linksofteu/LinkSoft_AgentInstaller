@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 
 VERSION="1.1.0"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,7 +31,7 @@ FIGMA_URL="https://mcp.figma.com/mcp"
 FIGMA_REGISTER_URL="https://api.figma.com/v1/oauth/mcp/register"
 FIGMA_OPENCODE_REDIRECT_URI="http://127.0.0.1:19876/mcp/oauth/callback"
 BROWSER_MCP_EXTENSION_URL="https://chromewebstore.google.com/detail/browser-mcp-automate-your/bjfgambnhccakkhmkepdoekmckoijdlc?pli=1"
-DEFAULT_LOG_FILE="$SCRIPT_DIR/setup-agentic-tools.log"
+DEFAULT_LOG_FILE="$(default_log_file_path)"
 
 NON_INTERACTIVE=0
 COPY_SKILLS=0
@@ -164,6 +164,7 @@ main() {
     NON_INTERACTIVE=1
   fi
   ensure_log_file
+  enable_error_reporting
   note "$(format_label "Version:") $(format_value "$VERSION")"
   if (( DRY_RUN != 0 )); then
     note "$(format_label "Mode:") $(format_value "dry-run (non-interactive preview)")"

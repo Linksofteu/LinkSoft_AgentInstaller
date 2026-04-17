@@ -35,6 +35,40 @@ else
   UI_OUT=/dev/stdout
 fi
 
+default_log_root() {
+  if [[ -n "${XDG_STATE_HOME:-}" ]]; then
+    printf '%s/linksoft-agent-installer/logs' "$XDG_STATE_HOME"
+  elif [[ -n "${HOME:-}" ]]; then
+    printf '%s/.local/state/linksoft-agent-installer/logs' "$HOME"
+  else
+    printf '%s' "${SCRIPT_DIR:-.}"
+  fi
+}
+
+default_log_file_path() {
+  local root
+  root="$(default_log_root)"
+  printf '%s/setup-agentic-tools-%s.log' "$root" "$(date -u '+%Y%m%dT%H%M%SZ')"
+}
+
+print_log_hint() {
+  [[ -n "${LOG_FILE:-}" ]] || return 0
+  printf '%sSee log:%s %s\n' "$COLOR_DIM" "$COLOR_RESET" "$LOG_FILE" >&2
+}
+
+report_unhandled_error() {
+  local exit_code="$1"
+  local line_no="$2"
+  local command_text="$3"
+  append_log "ERROR unexpected exit code ${exit_code} at line ${line_no}: ${command_text}"
+  printf '%sERROR%s Installer aborted at line %s while running: %s\n' "$COLOR_RED" "$COLOR_RESET" "$line_no" "$command_text" >&2
+  print_log_hint
+}
+
+enable_error_reporting() {
+  trap 'exit_code=$?; report_unhandled_error "$exit_code" "${BASH_LINENO[0]:-${LINENO}}" "${BASH_COMMAND:-unknown}"' ERR
+}
+
 strip_ansi_text() {
   python3 -c 'import re, sys; text = sys.stdin.read(); text = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", text); text = text.replace("\r", ""); sys.stdout.write(text)'
 }
@@ -302,11 +336,15 @@ run_cmd() {
   "${cmd[@]}" >"$tmp_file" 2>&1 &
   cmd_pid=$!
   draw_spinner_until_done "$cmd_pid" "$message"
-  wait "$cmd_pid"
-  local exit_code=$?
-  elapsed=$(( $(date +%s) - start_ts ))
-  finish_spinner "$exit_code" "$message" "$elapsed"
-  trap - INT TERM
+   local exit_code
+   if wait "$cmd_pid"; then
+     exit_code=0
+   else
+     exit_code=$?
+   fi
+   elapsed=$(( $(date +%s) - start_ts ))
+   finish_spinner "$exit_code" "$message" "$elapsed"
+   trap - INT TERM
 
   if [[ "$exit_code" -eq 0 ]]; then
     append_log "OK: $(printf '%q ' "${cmd[@]}")"
@@ -321,6 +359,7 @@ run_cmd() {
   cat "$tmp_file"
   rm -f "$tmp_file"
   warn "[fail] command exited with code $exit_code"
+  print_log_hint
   return "$exit_code"
 }
 

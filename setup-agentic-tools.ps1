@@ -22,7 +22,6 @@ $script:FigmaUrl = 'https://mcp.figma.com/mcp'
 $script:FigmaRegisterUrl = 'https://api.figma.com/v1/oauth/mcp/register'
 $script:FigmaOpenCodeRedirectUri = 'http://127.0.0.1:19876/mcp/oauth/callback'
 $script:BrowserMcpExtensionUrl = 'https://chromewebstore.google.com/detail/browser-mcp-automate-your/bjfgambnhccakkhmkepdoekmckoijdlc?pli=1'
-$script:DefaultLogFile = Join-Path $script:ScriptDir 'setup-agentic-tools.log'
 $script:KnownTools = @(
   'opencode',
   'claude-code',
@@ -61,6 +60,25 @@ $script:VerifyFailCount = 0
 $script:VerifySkipCount = 0
 $script:VerifyFailedLabels = @()
 
+function Get-DefaultLogRoot {
+  if (-not [string]::IsNullOrWhiteSpace($env:XDG_STATE_HOME)) {
+    return (Join-Path $env:XDG_STATE_HOME 'linksoft-agent-installer/logs')
+  }
+
+  $localAppData = Get-LocalAppDataPath
+  if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+    return (Join-Path $localAppData 'linksoft-agent-installer/logs')
+  }
+
+  return (Join-Path (Get-HomePath) '.linksoft-agent-installer/logs')
+}
+
+function Get-DefaultLogFile {
+  return (Join-Path (Get-DefaultLogRoot) ('setup-agentic-tools-{0}.log' -f ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))))
+}
+
+$script:DefaultLogFile = Get-DefaultLogFile
+
 function Format-Label([string]$Text) { return $Text }
 function Format-Value([string]$Text) { return $Text }
 
@@ -82,6 +100,12 @@ function Warn([string]$Text) {
 function Fail([string]$Text) {
   Append-Log ("ERROR {0}" -f $Text)
   throw $Text
+}
+
+function Show-LogHint {
+  if (-not [string]::IsNullOrWhiteSpace($script:Options.LogFile)) {
+    Write-Host ("Log file: {0}" -f $script:Options.LogFile)
+  }
 }
 
 function Log([string]$Text) {
@@ -449,8 +473,10 @@ function Invoke-ExternalCommand {
 
   if ($null -eq $exitCode) { $exitCode = 0 }
   if ($exitCode -ne 0 -and -not $IgnoreExitCode) {
+    Append-Log ("FAIL({0}): {1}" -f $exitCode, $rendered)
     Fail "Command failed with exit code ${exitCode}: $rendered"
   }
+  Append-Log ("OK: {0}" -f $rendered)
   return ($exitCode -eq 0)
 }
 
@@ -1674,6 +1700,13 @@ function Main([string[]]$CliArgs) {
 try {
   Main $args
 } catch {
+  if (-not [string]::IsNullOrWhiteSpace($script:Options.LogFile)) {
+    Append-Log ("ERROR {0}" -f $_.Exception.Message)
+    if ($_.ScriptStackTrace) {
+      Append-Log $_.ScriptStackTrace
+    }
+  }
   Write-Error $_
+  Show-LogHint
   exit 1
 }
