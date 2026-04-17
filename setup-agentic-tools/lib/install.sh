@@ -494,7 +494,7 @@ register_figma_opencode_oauth_client() {
 
   local response client_id client_secret
 
-  response="$(capture_cmd curl -X POST "$FIGMA_REGISTER_URL" -H "Content-Type: application/json" -d '{
+  response="$(capture_cmd curl -sS -X POST "$FIGMA_REGISTER_URL" -H "Content-Type: application/json" -d '{
       "client_name": "Claude Code (figma)",
       "redirect_uris": ["http://127.0.0.1:19876/mcp/oauth/callback"],
       "grant_types": ["authorization_code", "refresh_token"],
