@@ -21,6 +21,7 @@ $script:FigmaServerName = 'figma'
 $script:FigmaUrl = 'https://mcp.figma.com/mcp'
 $script:FigmaRegisterUrl = 'https://api.figma.com/v1/oauth/mcp/register'
 $script:FigmaOpenCodeRedirectUri = 'http://127.0.0.1:19876/mcp/oauth/callback'
+$script:BrowserMcpExtensionUrl = 'https://chromewebstore.google.com/detail/browser-mcp-automate-your/bjfgambnhccakkhmkepdoekmckoijdlc?pli=1'
 $script:DefaultLogFile = Join-Path $script:ScriptDir 'setup-agentic-tools.log'
 $script:KnownTools = @(
   'opencode',
@@ -1650,6 +1651,13 @@ function Main([string[]]$CliArgs) {
   }
 
   Phase 5 5 'Printing manual follow-up steps'
+  Note "$(Format-Label 'Browser MCP extension:') $(Format-Value $script:BrowserMcpExtensionUrl)"
+  Note 'Install this extension in Chrome, Chromium, or Vivaldi to make Browser MCP work.'
+  if (-not $script:Options.NonInteractive) {
+    [void](Read-Host 'Press Enter after installing the Browser MCP extension to view manual verification steps')
+  } else {
+    Note 'Non-interactive mode: unable to wait for Enter before printing manual verification steps.'
+  }
   Print-ManualVerificationInstructions $validatedTools
 
   Log 'Done'

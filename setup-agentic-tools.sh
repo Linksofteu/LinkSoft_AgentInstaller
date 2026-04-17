@@ -30,6 +30,7 @@ FIGMA_SERVER_NAME="figma"
 FIGMA_URL="https://mcp.figma.com/mcp"
 FIGMA_REGISTER_URL="https://api.figma.com/v1/oauth/mcp/register"
 FIGMA_OPENCODE_REDIRECT_URI="http://127.0.0.1:19876/mcp/oauth/callback"
+BROWSER_MCP_EXTENSION_URL="https://chromewebstore.google.com/detail/browser-mcp-automate-your/bjfgambnhccakkhmkepdoekmckoijdlc?pli=1"
 DEFAULT_LOG_FILE="$SCRIPT_DIR/setup-agentic-tools.log"
 
 NON_INTERACTIVE=0
@@ -317,6 +318,13 @@ main() {
   fi
 
   phase 5 5 "Printing manual follow-up steps"
+  note "$(format_label "Browser MCP extension:") $(format_value "$BROWSER_MCP_EXTENSION_URL")"
+  note "Install this extension in Chrome, Chromium, or Vivaldi to make Browser MCP work."
+  if (( NON_INTERACTIVE == 0 )); then
+    read -r -p "Press Enter after installing the Browser MCP extension to view manual verification steps..." </dev/tty
+  else
+    note "Non-interactive mode: unable to wait for Enter before printing manual verification steps."
+  fi
   print_manual_verification_instructions "${validated_tools[@]}"
 
   log "Done"
