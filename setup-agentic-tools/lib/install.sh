@@ -456,8 +456,8 @@ def strip_jsonc(text: str) -> str:
 path = os.path.expanduser(os.environ["TARGET_PATH"])
 server_name = os.environ["FIGMA_SERVER_NAME"]
 url = os.environ["FIGMA_URL"]
-client_id = os.environ.get("FIGMA_CLIENT_ID", "")
-client_secret = os.environ.get("FIGMA_CLIENT_SECRET", "")
+client_id = os.environ["FIGMA_CLIENT_ID"]
+client_secret = os.environ["FIGMA_CLIENT_SECRET"]
 
 parent = os.path.dirname(path)
 if parent:
@@ -473,21 +473,15 @@ if os.path.exists(path):
 
 data.setdefault("$schema", "https://opencode.ai/config.json")
 data.setdefault("mcp", {})
-server = {
+data["mcp"][server_name] = {
     "enabled": True,
     "type": "remote",
     "url": url,
+    "oauth": {
+        "clientId": client_id,
+        "clientSecret": client_secret,
+    },
 }
-
-if client_id or client_secret:
-    oauth = {}
-    if client_id:
-        oauth["clientId"] = client_id
-    if client_secret:
-        oauth["clientSecret"] = client_secret
-    server["oauth"] = oauth
-
-data["mcp"][server_name] = server
 
 with open(path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
@@ -498,10 +492,15 @@ PY
 register_figma_opencode_oauth_client() {
   ensure_install_globals
 
-  local payload response client_id client_secret
-  payload=$(printf '{"client_name":"LinkSoft Agent Installer (opencode)","redirect_uris":["%s"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}' "$FIGMA_OPENCODE_REDIRECT_URI")
+  local response client_id client_secret
 
-  response="$(capture_cmd curl -fsS -X POST "$FIGMA_REGISTER_URL" -H "Content-Type: application/json" -d "$payload")" || die "Failed to register Figma OAuth client for OpenCode"
+  response="$(capture_cmd curl -X POST "$FIGMA_REGISTER_URL" -H "Content-Type: application/json" -d '{
+      "client_name": "Claude Code (figma)",
+      "redirect_uris": ["http://127.0.0.1:19876/mcp/oauth/callback"],
+      "grant_types": ["authorization_code", "refresh_token"],
+      "response_types": ["code"],
+      "token_endpoint_auth_method": "none"
+    }')" || die "Failed to register Figma OAuth client for OpenCode"
 
   client_id="$(RESPONSE_JSON="$response" python3 - <<'PY'
 import json
@@ -562,6 +561,9 @@ configure_figma_opencode() {
     note "Would update ~/.config/opencode/opencode.json with a Figma remote MCP entry"
     return 0
   fi
+
+  [[ -n "$client_id" ]] || die "Cannot configure OpenCode Figma MCP without client_id"
+  [[ -n "$client_secret" ]] || die "Cannot configure OpenCode Figma MCP without client_secret"
 
   write_figma_opencode_json_config "~/.config/opencode/opencode.json" "$client_id" "$client_secret" || die "Failed to configure OpenCode for Figma MCP"
 }

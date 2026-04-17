@@ -875,37 +875,41 @@ function Configure-OpenCodeFigma([string]$ClientId, [string]$ClientSecret) {
     return
   }
 
+  if ([string]::IsNullOrWhiteSpace($ClientId)) {
+    Fail 'Cannot configure OpenCode Figma MCP without client_id'
+  }
+  if ([string]::IsNullOrWhiteSpace($ClientSecret)) {
+    Fail 'Cannot configure OpenCode Figma MCP without client_secret'
+  }
+
   Backup-FileIfPresent $path
   $data = Read-JsoncDocument $path
   Set-JsonPropertyValue $data '$schema' 'https://opencode.ai/config.json'
   $mcp = Ensure-JsonObjectProperty $data 'mcp'
+  $oauth = [ordered]@{
+    clientId = $ClientId
+    clientSecret = $ClientSecret
+  }
   $value = [ordered]@{
     enabled = $true
     type = 'remote'
     url = $script:FigmaUrl
-  }
-  if (-not [string]::IsNullOrWhiteSpace($ClientId) -or -not [string]::IsNullOrWhiteSpace($ClientSecret)) {
-    $oauth = [ordered]@{}
-    if (-not [string]::IsNullOrWhiteSpace($ClientId)) {
-      $oauth.clientId = $ClientId
-    }
-    if (-not [string]::IsNullOrWhiteSpace($ClientSecret)) {
-      $oauth.clientSecret = $ClientSecret
-    }
-    $value.oauth = [pscustomobject]$oauth
+    oauth = [pscustomobject]$oauth
   }
   Set-JsonPropertyValue $mcp $script:FigmaServerName ([pscustomobject]$value)
   Write-JsonDocument $path $data
 }
 
 function Register-FigmaOpenCodeClient {
-  $body = [ordered]@{
-    client_name = 'LinkSoft Agent Installer (opencode)'
-    redirect_uris = @($script:FigmaOpenCodeRedirectUri)
-    grant_types = @('authorization_code', 'refresh_token')
-    response_types = @('code')
-    token_endpoint_auth_method = 'none'
-  } | ConvertTo-Json -Depth 10
+  $body = @'
+{
+  "client_name": "Claude Code (figma)",
+  "redirect_uris": ["http://127.0.0.1:19876/mcp/oauth/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}
+'@
 
   if ($script:Options.DryRun) {
     Note "Would register a Figma OAuth client for OpenCode using callback $($script:FigmaOpenCodeRedirectUri)"
