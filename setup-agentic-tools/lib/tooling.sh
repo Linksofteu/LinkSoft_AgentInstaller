@@ -153,26 +153,43 @@ tool_skill_static_paths() {
   esac
 }
 
-mcpm_client_name() {
+tool_mcp_static_paths() {
   local tool="$1"
   case "$tool" in
-    claude-code) printf 'claude-code' ;;
-    cursor) printf 'cursor' ;;
-    windsurf) printf 'windsurf' ;;
-    codex) printf 'codex-cli' ;;
-    cline) printf 'cline' ;;
-    continue) printf 'continue' ;;
-    goose) printf 'goose-cli' ;;
-    roo) printf 'roo-code' ;;
-    gemini-cli) printf 'gemini-cli' ;;
-    *) return 1 ;;
+    opencode)
+      printf '%s/.config/opencode/opencode.json\n' "$HOME"
+      ;;
+    claude-code)
+      printf '%s/.claude.json\n' "$HOME"
+      ;;
+    codex)
+      printf '%s/.codex/config.toml\n' "$HOME"
+      ;;
+    github-copilot-cli)
+      printf '%s/.copilot/mcp-config.json\n' "$HOME"
+      ;;
+    cline)
+      printf '%s/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json\n' "$HOME"
+      ;;
+    continue)
+      printf '%s/.continue/mcpServers/%s.json\n' "$HOME" "$CONTEXT7_SERVER_NAME"
+      ;;
+    vscode)
+      printf '%s/.config/Code/User/mcp.json\n' "$HOME"
+      ;;
+    gemini-cli)
+      printf '%s/.gemini/settings.json\n' "$HOME"
+      ;;
+    *)
+      return 1
+      ;;
   esac
 }
 
 tool_has_mcp_cli_check() {
   local tool="$1"
   case "$tool" in
-    opencode|claude-code) return 0 ;;
+    opencode|claude-code|codex|gemini-cli) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -202,88 +219,130 @@ tool_native_skills_check_hint() {
   esac
 }
 
+_mvi_header() {
+  local tool="$1"
+  section_divider
+  note "$(format_label "  $tool")"
+  section_divider
+}
+
 print_manual_verification_instructions() {
   log "Manual verification instructions"
   local tool
+  local skill_response="I greet you from the world of skills, user! You shall use me skillfully."
   for tool in "$@"; do
     case "$tool" in
-      github-copilot-cli)
-        note "$(cat <<'EOF'
-- github-copilot-cli:
-  1. Start Copilot CLI by running: copilot
-  2. Run: /skills list
-  3. Run: /mcp and confirm context7 is configured.
-  4. Invoke /test-skill or ask Copilot to use context7 in a prompt.
-EOF
-)"
-        ;;
-      vscode)
-        note "$(cat <<'EOF'
-- vscode:
-  1. Open VS Code in the target workspace.
-  2. Open Command Palette (Ctrl+Shift+P) and run: MCP: List Servers.
-  3. Open Copilot Chat in Agent mode and inspect the tools list.
-  4. If context7 is present but unavailable, open ~/.config/Code/User/mcp.json and verify the command path.
-EOF
-)"
-        ;;
-      github-copilot)
-        note "$(cat <<'EOF'
-- github-copilot:
-  1. Verify the skill exists in ~/.agents/skills, ~/.claude/skills, or ~/.copilot/skills.
-  2. In Copilot CLI, run: /skills list
-  3. In VS Code Agent mode, type /skills and confirm the skill appears.
-  4. For MCP in VS Code, also select the 'vscode' target and run MCP: List Servers.
-EOF
-)"
-        ;;
-      cline)
-        note "$(cat <<EOF
-- cline:
-  1. Verify the skill exists in ~/.agents/skills/${SKILL_NAME}/SKILL.md.
-  2. Inspect ~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json.
-  3. Open Cline and run a prompt that explicitly says to use context7.
-  4. Run another prompt that explicitly invokes or depends on the installed skill.
-EOF
-)"
-        ;;
       claude-code)
-        note "$(cat <<'EOF'
-- claude-code:
-  1. Run: claude mcp list
-  2. Inside Claude Code, run: /mcp
-  3. Invoke /test-skill or ask: What skills are available?
-EOF
-)"
+        _mvi_header "$tool"
+        note "  1. Open Claude Code."
+        note "  2. Run in chat: /mcp"
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
+        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
         ;;
       opencode)
-        note "$(cat <<'EOF'
-- opencode:
-  1. Run: opencode mcp list
-  2. Optionally run: opencode mcp debug context7
-  3. Open an OpenCode session and inspect the available skills / invoke the installed skill in a task.
-EOF
-)"
+        _mvi_header "$tool"
+        note "  1. Open OpenCode."
+        note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
+        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
         ;;
       codex)
-        note "$(cat <<'EOF'
-- codex:
-  1. Open Codex CLI or TUI.
-  2. Run /mcp in the TUI, or inspect ~/.codex/config.toml for the configured server.
-  3. Run /skills and confirm the skill is listed.
-  4. Invoke the skill explicitly with the Codex skill picker or prompt.
-EOF
-)"
+        _mvi_header "$tool"
+        note "  1. Open Codex."
+        note "  2. Run in chat: /mcp"
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
+        note "  3. Run in chat: /skills"
+        note "     Confirm ${SKILL_NAME} is listed."
+        note "  4. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
         ;;
-      cursor|windsurf|continue|goose|roo|gemini-cli)
-        note "$(cat <<EOF
-- $tool:
-  1. Inspect the tool's MCP/skills settings UI or config file.
-  2. Confirm the test skill folder and Context7 server entry are present.
-  3. Run one prompt that explicitly asks the tool to use context7 and another that invokes the installed skill.
-EOF
-)"
+      gemini-cli)
+        _mvi_header "$tool"
+        note "  1. Open Gemini CLI."
+        note "  2. Run in chat: /mcp"
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is connected."
+        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
+        ;;
+      github-copilot-cli)
+        _mvi_header "$tool"
+        note "  1. Open GitHub Copilot CLI."
+        note "  2. Run in chat: /mcp"
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        note "  3. Run in chat: /skills list"
+        note "     Confirm ${SKILL_NAME} is listed."
+        note "  4. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
+        ;;
+      vscode)
+        _mvi_header "$tool"
+        note "  1. Open VS Code."
+        note "  2. Open Command Palette (Ctrl+Shift+P) → MCP: List Servers."
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        note "  3. Open Copilot Chat in Agent mode."
+        note "     Confirm skill tools appear in the tools panel."
+        note "  4. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
+        ;;
+      github-copilot)
+        _mvi_header "$tool"
+        note "  1. Open VS Code."
+        note "  2. Open Command Palette (Ctrl+Shift+P) → MCP: List Servers."
+        note "     (MCP is wired via the vscode target)"
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        note "  3. Open Copilot Chat in Agent mode."
+        note "     Confirm skill tools appear in the tools panel."
+        note "  4. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
+        ;;
+      cline)
+        _mvi_header "$tool"
+        note "  1. Open Cline."
+        note "  2. Open MCP Servers panel."
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is listed and connected."
+        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
+        ;;
+      cursor)
+        _mvi_header "$tool"
+        note "  1. Open Cursor."
+        note "  2. Open Settings → MCP."
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
+        ;;
+      windsurf)
+        _mvi_header "$tool"
+        note "  1. Open Windsurf."
+        note "  2. Open Cascade → MCP panel."
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is listed."
+        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
+        ;;
+      roo)
+        _mvi_header "$tool"
+        note "  1. Open VS Code with Roo."
+        note "  2. Open MCP Servers panel."
+        note "     Confirm ${CONTEXT7_SERVER_NAME} is listed and connected."
+        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
+        ;;
+      continue)
+        _mvi_header "$tool"
+        note "  1. Open VS Code with Continue."
+        note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
+        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
+        ;;
+      goose)
+        _mvi_header "$tool"
+        note "  1. Open Goose."
+        note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
+        note "  3. Prompt in chat: Run the ${SKILL_NAME} skill."
+        note "     Expected: \"${skill_response}\""
         ;;
     esac
   done
+  section_divider
 }

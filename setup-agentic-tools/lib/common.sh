@@ -250,23 +250,6 @@ command_message() {
         printf 'Running npx command'
         return 0
         ;;
-      mcpm)
-        for ((i += 1; i < ${#cmd[@]}; i++)); do
-          token="${cmd[$i]}"
-          [[ "$token" == -* ]] && continue
-          case "$token" in
-            install) printf 'Installing MCPM server'; return 0 ;;
-            new) printf 'Creating MCPM server'; return 0 ;;
-            edit) printf 'Updating MCPM server'; return 0 ;;
-            client) printf 'Updating MCPM client'; return 0 ;;
-            run) printf 'Running MCPM server'; return 0 ;;
-            ls) printf 'Listing MCPM servers'; return 0 ;;
-          esac
-          break
-        done
-        printf 'Running MCPM command'
-        return 0
-        ;;
       opencode)
         printf 'Checking OpenCode MCP configuration'
         return 0

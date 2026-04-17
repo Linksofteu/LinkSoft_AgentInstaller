@@ -5,8 +5,7 @@ LinkSoft_AgentInstaller is a cross-platform setup utility for installing and wir
 Today, the script focuses on:
 
 - installing the LinkSoft `test-skill`
-- installing/configuring the Context7 MCP server through `mcpm`
-- wiring that MCP server into selected tools
+- wiring the Context7 MCP server directly into supported tools
 - running static and smoke verification checks where supported
 
 ## Why this exists
@@ -27,8 +26,8 @@ When run, it will:
 2. let you add or choose the tools you want to configure
 3. install the LinkSoft test skill via `npx skills`
 4. check whether `openspec` is installed and, if missing, offer to install it globally via `npm`
-5. install the `context7` MCP server in `mcpm`
-6. wire Context7 into each selected tool using the tool's supported config path or MCPM client integration
+5. prepare a direct remote MCP configuration for `context7`
+6. write Context7 into each supported tool's config file or settings path
 7. run verification checks unless skipped
 8. print manual follow-up verification steps for the selected tools
 
@@ -49,7 +48,6 @@ Before running the installer, make sure these are available:
 - `python3`
 - `npx` if you are installing skills
 - `npm` if you want the installer to add `openspec` for you when it is missing
-- `mcpm` if you are installing or wiring MCP
 
 ### Windows
 
@@ -58,7 +56,6 @@ Before running the PowerShell installer, make sure these are available:
 - **PowerShell 5.1 or later** — ships with Windows 10/11; PowerShell 7+ also works
 - `npx` (via Node.js) if you are installing skills
 - `npm` if you want the installer to add `openspec` for you when it is missing
-- `mcpm` if you are installing or wiring MCP
 
 **Execution policy**: The bootstrap one-liner pipes a remote script into `iex`, so no special execution policy is required for that approach. If you download and run `setup-agentic-tools.ps1` directly, PowerShell's default policy may block it. Allow the script to run with:
 
@@ -249,7 +246,7 @@ The repository currently knows about these tool ids:
 - `vscode`
 - `gemini-cli`
 
-Support level varies by tool. Some have direct config-file handling in this repository, while others are wired through `mcpm client edit`.
+Support level varies by tool. Some tools are configured directly by this repository today, while others still require manual MCP setup after the installer finishes.
 
 ## Tool-specific notes
 
@@ -285,9 +282,18 @@ The table below lists where the installed skill file lands after `npx skills` ru
 
 ### Context7 MCP wiring
 
-Context7 is installed into MCPM first, then connected to selected tools.
+Context7 is configured as a direct remote MCP server. No external MCP manager is required.
 
-Special handling exists for three tools that receive direct JSON config writes. All other supported tools are wired through `mcpm client edit`.
+The installer currently writes direct MCP configuration for these tools:
+
+- `opencode`
+- `claude-code`
+- `codex`
+- `github-copilot-cli`
+- `cline`
+- `continue`
+- `vscode`
+- `gemini-cli`
 
 For `github-copilot`, MCP wiring is not done directly by this script; use the `vscode` target when configuring Copilot inside VS Code.
 
@@ -296,26 +302,22 @@ For `github-copilot`, MCP wiring is not done directly by this script; use the `v
 | Tool id | Linux / macOS path | Windows path |
 |---------|-------------------|--------------|
 | `opencode` | `~/.config/opencode/opencode.json` | `%APPDATA%\opencode\opencode.json` |
+| `claude-code` | `~/.claude.json` | `%USERPROFILE%\.claude.json` |
+| `codex` | `~/.codex/config.toml` | `%USERPROFILE%\.codex\config.toml` |
+| `cline` | `~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | `%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json` |
+| `continue` | `~/.continue/mcpServers/context7.json` | `%USERPROFILE%\.continue\mcpServers\context7.json` |
 | `vscode` | `~/.config/Code/User/mcp.json` | `%APPDATA%\Code\User\mcp.json` |
 | `github-copilot-cli` | `~/.copilot/mcp-config.json` | `%USERPROFILE%\.copilot\mcp-config.json` |
+| `gemini-cli` | `~/.gemini/settings.json` | `%USERPROFILE%\.gemini\settings.json` |
 
-Tools wired via `mcpm client edit` do not have a single config path managed by this script; MCPM writes to its own client config store.
+The tools below are detected and can still receive skills, but MCP configuration is not currently written automatically by this repository:
 
-#### MCPM client names
+- `cursor`
+- `windsurf`
+- `goose`
+- `roo`
 
-The table below lists the MCPM client name used when wiring via `mcpm client edit`.
-
-| Tool id | MCPM client name |
-|---------|-----------------|
-| `claude-code` | `claude-code` |
-| `cursor` | `cursor` |
-| `windsurf` | `windsurf` |
-| `codex` | `codex-cli` |
-| `cline` | `cline` |
-| `continue` | `continue` |
-| `goose` | `goose-cli` |
-| `roo` | `roo-code` |
-| `gemini-cli` | `gemini-cli` |
+For those tools, the installer prints manual follow-up steps instead of writing a tool-specific MCP config.
 
 ### Windows tool detection
 

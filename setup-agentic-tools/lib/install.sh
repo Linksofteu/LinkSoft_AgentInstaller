@@ -11,9 +11,6 @@ ensure_prereqs() {
   if (( SKIP_SKILLS == 0 )); then
     has_cmd npx || die "npx is required"
   fi
-  if (( SKIP_MCP == 0 )); then
-    has_cmd mcpm || die "mcpm is required. Install it first, then rerun this script."
-  fi
   has_cmd python3 || die "python3 is required"
 }
 
@@ -78,34 +75,25 @@ install_context7_server() {
   ensure_install_globals
   local api_key="$1"
 
-  log "Installing Context7 in MCPM"
+  log "Preparing direct Context7 MCP configuration"
 
   if (( DRY_RUN )); then
-    note "Would ensure MCPM server '$CONTEXT7_SERVER_NAME' exists"
-  elif mcpm ls 2>/dev/null | grep -Eq "^[[:space:]]*${CONTEXT7_SERVER_NAME}([[:space:]].*)?$"; then
-    note "Context7 already exists in MCPM"
-  elif ! run_cmd mcpm install "$CONTEXT7_SERVER_NAME" --force; then
-    warn "mcpm registry install failed; falling back to manual MCPM server definition"
-    run_cmd mcpm new "$CONTEXT7_SERVER_NAME" --type remote --url "$CONTEXT7_URL" --force
-  fi
-
-  if [[ -n "$api_key" ]]; then
-    run_cmd mcpm edit "$CONTEXT7_SERVER_NAME" --url "$CONTEXT7_URL" --headers "CONTEXT7_API_KEY=$api_key" --force
-  fi
-}
-
-configure_opencode() {
-  ensure_install_globals
-  log "Configuring OpenCode to use MCPM-managed Context7"
-  if (( DRY_RUN )); then
-    note "Would update ~/.config/opencode/opencode.json"
+    note "Would configure supported tools with a direct remote MCP entry for '$CONTEXT7_SERVER_NAME'"
+    if [[ -n "$api_key" ]]; then
+      note "Would include a Context7 API key header in supported tool configurations"
+    fi
     return 0
   fi
 
-  local mcpm_bin
-  mcpm_bin="$(command -v mcpm)"
+  note "No standalone MCP manager is used; supported tools are configured directly"
+}
 
-  MCPM_BIN="$mcpm_bin" python3 - <<'PY' || die "Failed to configure OpenCode"
+write_context7_json_config() {
+  local path="$1"
+  local mode="$2"
+  local api_key="${3:-}"
+
+  TARGET_PATH="$path" CONFIG_MODE="$mode" CONTEXT7_API_KEY="$api_key" CONTEXT7_SERVER_NAME="$CONTEXT7_SERVER_NAME" CONTEXT7_URL="$CONTEXT7_URL" python3 - <<'PY'
 import json
 import os
 import shutil
@@ -207,25 +195,113 @@ def strip_jsonc(text: str) -> str:
     return "".join(compact)
 
 
-path = os.path.expanduser("~/.config/opencode/opencode.json")
-os.makedirs(os.path.dirname(path), exist_ok=True)
+def load_jsonc(path: str):
+    data = {}
+    if os.path.exists(path):
+        shutil.copy2(path, f"{path}.bak.{int(time.time())}")
+        with open(path, "r", encoding="utf-8") as f:
+            raw = strip_jsonc(f.read()).strip()
+        if raw:
+            data = json.loads(raw)
+    return data
 
-data = {}
-if os.path.exists(path):
-    with open(path, "r", encoding="utf-8") as f:
-        raw = f.read()
-    shutil.copy2(path, f"{path}.bak.{int(time.time())}")
-    stripped = strip_jsonc(raw).strip()
-    if stripped:
-        data = json.loads(stripped)
 
-data.setdefault("$schema", "https://opencode.ai/config.json")
-data.setdefault("mcp", {})
-data["mcp"]["context7"] = {
-    "type": "local",
-    "command": [os.environ["MCPM_BIN"], "run", "context7"],
-    "enabled": True,
-}
+def clean_none(value):
+    if isinstance(value, dict):
+        return {k: clean_none(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [clean_none(v) for v in value]
+    return value
+
+
+path = os.path.expanduser(os.environ["TARGET_PATH"])
+mode = os.environ["CONFIG_MODE"]
+server_name = os.environ["CONTEXT7_SERVER_NAME"]
+url = os.environ["CONTEXT7_URL"]
+api_key = os.environ.get("CONTEXT7_API_KEY", "")
+headers = {"CONTEXT7_API_KEY": api_key} if api_key else None
+
+parent = os.path.dirname(path)
+if parent:
+    os.makedirs(parent, exist_ok=True)
+data = load_jsonc(path)
+
+if mode == "opencode":
+    data.setdefault("$schema", "https://opencode.ai/config.json")
+    data.setdefault("mcp", {})
+    data["mcp"][server_name] = clean_none(
+        {
+            "type": "remote",
+            "url": url,
+            "headers": headers,
+            "enabled": True,
+        }
+    )
+elif mode == "vscode":
+    data.setdefault("servers", {})
+    data.setdefault("inputs", [])
+    data["servers"][server_name] = clean_none(
+        {
+            "type": "http",
+            "url": url,
+            "headers": headers,
+        }
+    )
+elif mode == "copilot-cli":
+    legacy_servers = data.pop("servers", None)
+    data.setdefault("mcpServers", {})
+    if isinstance(legacy_servers, dict):
+        for key, value in legacy_servers.items():
+            data["mcpServers"].setdefault(key, value)
+    data["mcpServers"][server_name] = clean_none(
+        {
+            "type": "http",
+            "url": url,
+            "headers": headers,
+            "tools": ["*"],
+        }
+    )
+elif mode == "claude-code":
+    data.setdefault("mcpServers", {})
+    data["mcpServers"][server_name] = clean_none(
+        {
+            "type": "http",
+            "url": url,
+            "headers": headers,
+        }
+    )
+elif mode == "cline":
+    data.setdefault("mcpServers", {})
+    data["mcpServers"][server_name] = clean_none(
+        {
+            "url": url,
+            "headers": headers,
+            "disabled": False,
+        }
+    )
+elif mode == "continue":
+    data = {
+        "mcpServers": {
+            server_name: clean_none(
+                {
+                    "type": "http",
+                    "url": url,
+                    "headers": headers,
+                }
+            )
+        }
+    }
+elif mode == "gemini":
+    data.setdefault("mcpServers", {})
+    data["mcpServers"][server_name] = clean_none(
+        {
+            "httpUrl": url,
+            "headers": headers,
+            "timeout": 600000,
+        }
+    )
+else:
+    raise SystemExit(f"Unsupported config mode: {mode}")
 
 with open(path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
@@ -233,319 +309,186 @@ with open(path, "w", encoding="utf-8") as f:
 PY
 }
 
+configure_opencode() {
+  ensure_install_globals
+  local api_key="${1:-}"
+  log "Configuring OpenCode with direct Context7 MCP"
+  if (( DRY_RUN )); then
+    note "Would update ~/.config/opencode/opencode.json"
+    return 0
+  fi
+
+  write_context7_json_config "~/.config/opencode/opencode.json" "opencode" "$api_key" || die "Failed to configure OpenCode"
+}
+
+configure_claude_code() {
+  ensure_install_globals
+  local api_key="${1:-}"
+  log "Configuring Claude Code MCP settings"
+  if (( DRY_RUN )); then
+    note "Would update ~/.claude.json"
+    return 0
+  fi
+
+  write_context7_json_config "~/.claude.json" "claude-code" "$api_key" || die "Failed to configure Claude Code"
+}
+
+configure_codex() {
+  ensure_install_globals
+  local api_key="${1:-}"
+  log "Configuring Codex MCP settings"
+  if (( DRY_RUN )); then
+    note "Would update ~/.codex/config.toml"
+    return 0
+  fi
+
+  CONTEXT7_API_KEY="$api_key" CONTEXT7_SERVER_NAME="$CONTEXT7_SERVER_NAME" CONTEXT7_URL="$CONTEXT7_URL" python3 - <<'PY' || die "Failed to configure Codex"
+import os
+import re
+import shutil
+import time
+
+
+path = os.path.expanduser("~/.codex/config.toml")
+os.makedirs(os.path.dirname(path), exist_ok=True)
+
+content = ""
+if os.path.exists(path):
+    shutil.copy2(path, f"{path}.bak.{int(time.time())}")
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+server_name = os.environ["CONTEXT7_SERVER_NAME"]
+url = os.environ["CONTEXT7_URL"]
+api_key = os.environ.get("CONTEXT7_API_KEY", "")
+
+section_lines = [
+    f"[mcp_servers.{server_name}]",
+    f'url = "{url}"',
+]
+if api_key:
+    section_lines.append(f'http_headers = {{ CONTEXT7_API_KEY = "{api_key}" }}')
+section = "\n".join(section_lines) + "\n"
+
+pattern = re.compile(rf'(?ms)^\[mcp_servers\.{re.escape(server_name)}\]\n.*?(?=^\[|\Z)')
+if pattern.search(content):
+    updated = pattern.sub(section, content).rstrip() + "\n"
+else:
+    updated = content.rstrip()
+    if updated:
+        updated += "\n\n"
+    updated += section
+
+with open(path, "w", encoding="utf-8") as f:
+    f.write(updated)
+PY
+}
+
 configure_vscode() {
   ensure_install_globals
+  local api_key="${1:-}"
   log "Configuring VS Code MCP file"
   if (( DRY_RUN )); then
     note "Would update ~/.config/Code/User/mcp.json"
     return 0
   fi
 
-  local mcpm_bin
-  mcpm_bin="$(command -v mcpm)"
-
-  MCPM_BIN="$mcpm_bin" python3 - <<'PY' || die "Failed to configure VS Code"
-import json
-import os
-import shutil
-import time
-
-
-def strip_jsonc(text: str) -> str:
-    result = []
-    in_string = False
-    string_char = ""
-    escaped = False
-    in_line_comment = False
-    in_block_comment = False
-    i = 0
-
-    while i < len(text):
-        ch = text[i]
-        nxt = text[i + 1] if i + 1 < len(text) else ""
-
-        if in_line_comment:
-            if ch == "\n":
-                in_line_comment = False
-                result.append(ch)
-            i += 1
-            continue
-
-        if in_block_comment:
-            if ch == "*" and nxt == "/":
-                in_block_comment = False
-                i += 2
-            else:
-                i += 1
-            continue
-
-        if in_string:
-            result.append(ch)
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == string_char:
-                in_string = False
-            i += 1
-            continue
-
-        if ch in ('"', "'"):
-            in_string = True
-            string_char = ch
-            result.append(ch)
-            i += 1
-            continue
-
-        if ch == "/" and nxt == "/":
-            in_line_comment = True
-            i += 2
-            continue
-
-        if ch == "/" and nxt == "*":
-            in_block_comment = True
-            i += 2
-            continue
-
-        result.append(ch)
-        i += 1
-
-    cleaned = "".join(result)
-    compact = []
-    in_string = False
-    string_char = ""
-    escaped = False
-    i = 0
-    while i < len(cleaned):
-        ch = cleaned[i]
-        if in_string:
-            compact.append(ch)
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == string_char:
-                in_string = False
-            i += 1
-            continue
-        if ch in ('"', "'"):
-            in_string = True
-            string_char = ch
-            compact.append(ch)
-            i += 1
-            continue
-        if ch == ",":
-            j = i + 1
-            while j < len(cleaned) and cleaned[j] in " \t\r\n":
-                j += 1
-            if j < len(cleaned) and cleaned[j] in "]}":
-                i += 1
-                continue
-        compact.append(ch)
-        i += 1
-    return "".join(compact)
-
-path = os.path.expanduser("~/.config/Code/User/mcp.json")
-os.makedirs(os.path.dirname(path), exist_ok=True)
-
-data = {}
-if os.path.exists(path):
-    shutil.copy2(path, f"{path}.bak.{int(time.time())}")
-    with open(path, "r", encoding="utf-8") as f:
-        raw = strip_jsonc(f.read()).strip()
-    if raw:
-        data = json.loads(raw)
-
-data.setdefault("servers", {})
-data.setdefault("inputs", [])
-data["servers"]["mcpm_context7"] = {
-    "type": "stdio",
-    "command": os.environ["MCPM_BIN"],
-    "args": ["run", "context7"],
-}
-
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-PY
+  write_context7_json_config "~/.config/Code/User/mcp.json" "vscode" "$api_key" || die "Failed to configure VS Code"
 }
 
 configure_github_copilot_cli() {
   ensure_install_globals
+  local api_key="${1:-}"
   log "Configuring GitHub Copilot CLI MCP file"
   if (( DRY_RUN )); then
     note "Would update ~/.copilot/mcp-config.json"
     return 0
   fi
 
-  local mcpm_bin
-  mcpm_bin="$(command -v mcpm)"
-
-  MCPM_BIN="$mcpm_bin" python3 - <<'PY' || die "Failed to configure GitHub Copilot CLI"
-import json
-import os
-import shutil
-import time
-
-
-def strip_jsonc(text: str) -> str:
-    result = []
-    in_string = False
-    string_char = ""
-    escaped = False
-    in_line_comment = False
-    in_block_comment = False
-    i = 0
-
-    while i < len(text):
-        ch = text[i]
-        nxt = text[i + 1] if i + 1 < len(text) else ""
-
-        if in_line_comment:
-            if ch == "\n":
-                in_line_comment = False
-                result.append(ch)
-            i += 1
-            continue
-
-        if in_block_comment:
-            if ch == "*" and nxt == "/":
-                in_block_comment = False
-                i += 2
-            else:
-                i += 1
-            continue
-
-        if in_string:
-            result.append(ch)
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == string_char:
-                in_string = False
-            i += 1
-            continue
-
-        if ch in ('"', "'"):
-            in_string = True
-            string_char = ch
-            result.append(ch)
-            i += 1
-            continue
-
-        if ch == "/" and nxt == "/":
-            in_line_comment = True
-            i += 2
-            continue
-
-        if ch == "/" and nxt == "*":
-            in_block_comment = True
-            i += 2
-            continue
-
-        result.append(ch)
-        i += 1
-
-    cleaned = "".join(result)
-    compact = []
-    in_string = False
-    string_char = ""
-    escaped = False
-    i = 0
-    while i < len(cleaned):
-        ch = cleaned[i]
-        if in_string:
-            compact.append(ch)
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == string_char:
-                in_string = False
-            i += 1
-            continue
-        if ch in ('"', "'"):
-            in_string = True
-            string_char = ch
-            compact.append(ch)
-            i += 1
-            continue
-        if ch == ",":
-            j = i + 1
-            while j < len(cleaned) and cleaned[j] in " \t\r\n":
-                j += 1
-            if j < len(cleaned) and cleaned[j] in "]}":
-                i += 1
-                continue
-        compact.append(ch)
-        i += 1
-    return "".join(compact)
-
-copilot_home = os.environ.get("COPILOT_HOME", os.path.expanduser("~/.copilot"))
-path = os.path.join(copilot_home, "mcp-config.json")
-os.makedirs(os.path.dirname(path), exist_ok=True)
-
-data = {}
-if os.path.exists(path):
-    shutil.copy2(path, f"{path}.bak.{int(time.time())}")
-    with open(path, "r", encoding="utf-8") as f:
-        raw = strip_jsonc(f.read()).strip()
-    if raw:
-        data = json.loads(raw)
-
-legacy_servers = data.pop("servers", None)
-data.setdefault("mcpServers", {})
-if isinstance(legacy_servers, dict):
-    for key, value in legacy_servers.items():
-        data["mcpServers"].setdefault(key, value)
-
-data["mcpServers"]["mcpm_context7"] = {
-    "type": "local",
-    "command": os.environ["MCPM_BIN"],
-    "args": ["run", "context7"],
+  write_context7_json_config "${COPILOT_HOME:-$HOME/.copilot}/mcp-config.json" "copilot-cli" "$api_key" || die "Failed to configure GitHub Copilot CLI"
 }
 
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-PY
+configure_cline() {
+  ensure_install_globals
+  local api_key="${1:-}"
+  log "Configuring Cline MCP settings"
+  if (( DRY_RUN )); then
+    note "Would update ~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json"
+    return 0
+  fi
+
+  write_context7_json_config "~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" "cline" "$api_key" || die "Failed to configure Cline"
+}
+
+configure_continue() {
+  ensure_install_globals
+  local api_key="${1:-}"
+  log "Configuring Continue MCP settings"
+  if (( DRY_RUN )); then
+    note "Would update ~/.continue/mcpServers/${CONTEXT7_SERVER_NAME}.json"
+    return 0
+  fi
+
+  write_context7_json_config "~/.continue/mcpServers/${CONTEXT7_SERVER_NAME}.json" "continue" "$api_key" || die "Failed to configure Continue"
+}
+
+configure_gemini_cli() {
+  ensure_install_globals
+  local api_key="${1:-}"
+  log "Configuring Gemini CLI MCP settings"
+  if (( DRY_RUN )); then
+    note "Would update ~/.gemini/settings.json"
+    return 0
+  fi
+
+  write_context7_json_config "~/.gemini/settings.json" "gemini" "$api_key" || die "Failed to configure Gemini CLI"
 }
 
 wire_context7_to_tool() {
   ensure_install_globals
   local tool="$1"
-  local client_name
+  local api_key="${2:-}"
 
   case "$tool" in
     opencode)
-      configure_opencode
+      configure_opencode "$api_key"
       ;;
-    vscode)
-      configure_vscode
+    claude-code)
+      configure_claude_code "$api_key"
+      ;;
+    codex)
+      configure_codex "$api_key"
       ;;
     github-copilot-cli)
-      configure_github_copilot_cli
+      configure_github_copilot_cli "$api_key"
+      ;;
+    cline)
+      configure_cline "$api_key"
+      ;;
+    continue)
+      configure_continue "$api_key"
+      ;;
+    vscode)
+      configure_vscode "$api_key"
+      ;;
+    gemini-cli)
+      configure_gemini_cli "$api_key"
       ;;
     github-copilot)
       warn "No standalone GitHub Copilot MCP file is configured here; use the 'vscode' target for Copilot-in-VS-Code MCP wiring"
       ;;
     *)
-      if client_name="$(mcpm_client_name "$tool" 2>/dev/null)"; then
-        log "Adding Context7 to $tool via MCPM client '$client_name'"
-        if ! run_cmd mcpm client edit "$client_name" --add-server "$CONTEXT7_SERVER_NAME" --force; then
-          warn "Failed to wire Context7 into MCPM client '$client_name' for tool '$tool'"
-        fi
-      else
-        warn "No MCP wiring strategy is defined for $tool"
-      fi
+      warn "No direct MCP wiring strategy is defined for $tool"
       ;;
   esac
 }
 
 wire_context7_to_tools() {
+  local api_key="$1"
+  shift
+  ensure_install_globals
   local tool
   for tool in "$@"; do
-    wire_context7_to_tool "$tool"
+    wire_context7_to_tool "$tool" "$api_key"
   done
 }

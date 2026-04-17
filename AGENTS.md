@@ -36,8 +36,8 @@ The Bash implementation is split into a thin entrypoint and four sourced librari
 |------|---------------|
 | `setup-agentic-tools.sh` | Globals, argument parsing, `main()` orchestration |
 | `setup-agentic-tools/lib/common.sh` | Logging helpers (`log`, `warn`, `die`, `note`), spinner, `run_cmd` / `capture_cmd` wrappers, CSV/array utilities |
-| `setup-agentic-tools/lib/tooling.sh` | Tool detection, `KNOWN_TOOLS` list, skill path mappings, MCPM client name mappings |
-| `setup-agentic-tools/lib/install.sh` | Skill installation via `npx skills`, Context7 installation in MCPM, per-tool MCP wiring (direct JSON for opencode/vscode/github-copilot-cli; `mcpm client edit` for the rest) |
+| `setup-agentic-tools/lib/tooling.sh` | Tool detection, `KNOWN_TOOLS` list, skill path mappings, and documented MCP config paths |
+| `setup-agentic-tools/lib/install.sh` | Skill installation via `npx skills`, direct Context7 config generation, and per-tool MCP wiring for the tools that have known config formats |
 | `setup-agentic-tools/lib/verify.sh` | Static and smoke verification checks, summary counters |
 
 `setup-agentic-tools.ps1` is a self-contained PowerShell port of the entire Bash implementation with the same options, phases, and logic. It must be kept in sync manually with the Bash version.
@@ -48,7 +48,7 @@ The Bash implementation is split into a thin entrypoint and four sourced librari
 
 **`run_cmd` vs `capture_cmd`**: `run_cmd` runs a command with a spinner and streams output on failure; `capture_cmd` runs silently and returns output as a string. Both respect `DRY_RUN` and `VERBOSE` flags.
 
-**Per-tool dispatch**: Three tools (`opencode`, `vscode`, `github-copilot-cli`) have direct JSON config manipulation using embedded Python (`install.sh`) or native PowerShell JSON helpers (`setup-agentic-tools.ps1`). All other supported tools are wired through `mcpm client edit` using the MCPM client name returned by `mcpm_client_name()` / `Get-McpmClientName()`.
+**Per-tool dispatch**: Tools with known config formats are wired directly by the installer. Bash uses embedded Python for JSON/TOML rewrites where convenient, and PowerShell uses native JSON helpers plus small text transforms for TOML.
 
 **Config file backup**: Before rewriting any JSON config, a timestamped `.bak.<epoch>` copy is created alongside the original.
 
@@ -62,6 +62,6 @@ The Bash implementation is split into a thin entrypoint and four sourced librari
 2. Add detection logic in `detect_tool()` / `Detect-Tool`.
 3. Map the skills agent name in `skills_agent_name()` / `Get-SkillAgentForTool`.
 4. Add the skill static path in `tool_skill_static_paths()` / `Get-ToolSkillStaticPaths`.
-5. Either add a direct `configure_<tool>()` function (for tools that need bespoke JSON wiring) or add a `mcpm_client_name` mapping (for tools wired via `mcpm client edit`).
+5. Add a direct `configure_<tool>()` function (or equivalent PowerShell function) for the tool's MCP config format and path.
 6. Add manual verification instructions to `print_manual_verification_instructions()` / `Print-ManualVerificationInstructions`.
 7. Add static MCP verification logic to `verify_mcp_static()` / `Verify-McpStatic` if applicable.

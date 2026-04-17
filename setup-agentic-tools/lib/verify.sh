@@ -90,59 +90,72 @@ verify_mcp_static() {
     return 0
   fi
 
-  local mcpm_servers=""
-  if mcpm_servers="$(capture_cmd mcpm ls)"; then
-    if grep -qi "$CONTEXT7_SERVER_NAME" <<<"$mcpm_servers"; then
-      report_verification_check "PASS" "mcp/global" "mcpm knows about $CONTEXT7_SERVER_NAME"
-    else
-      report_verification_check "FAIL" "mcp/global" "mcpm ls did not include $CONTEXT7_SERVER_NAME"
-    fi
-  else
-    report_verification_check "FAIL" "mcp/global" "unable to list MCPM servers"
-  fi
-
-  local mcpm_clients=""
-  mcpm_clients="$(capture_cmd mcpm client ls || true)"
-
-  local tool client_name
+  local tool
   for tool in "$@"; do
     case "$tool" in
       opencode)
-        if grep -q '"context7"' "$HOME/.config/opencode/opencode.json" 2>/dev/null; then
-          report_verification_check "PASS" "mcp/opencode" "OpenCode config contains context7"
+        if grep -q "\"$CONTEXT7_SERVER_NAME\"" "$HOME/.config/opencode/opencode.json" 2>/dev/null && grep -q '"type": "remote"' "$HOME/.config/opencode/opencode.json" 2>/dev/null; then
+          report_verification_check "PASS" "mcp/opencode" "OpenCode config contains a direct $CONTEXT7_SERVER_NAME remote server"
         else
-          report_verification_check "FAIL" "mcp/opencode" "OpenCode config missing context7"
+          report_verification_check "FAIL" "mcp/opencode" "OpenCode config missing $CONTEXT7_SERVER_NAME"
+        fi
+        ;;
+      claude-code)
+        if grep -q '"mcpServers"' "$HOME/.claude.json" 2>/dev/null && grep -q "\"$CONTEXT7_SERVER_NAME\"" "$HOME/.claude.json" 2>/dev/null; then
+          report_verification_check "PASS" "mcp/claude-code" "Claude Code config contains $CONTEXT7_SERVER_NAME"
+        else
+          report_verification_check "FAIL" "mcp/claude-code" "Claude Code config missing $CONTEXT7_SERVER_NAME"
+        fi
+        ;;
+      codex)
+        if grep -q "^\[mcp_servers\.$CONTEXT7_SERVER_NAME\]" "$HOME/.codex/config.toml" 2>/dev/null && grep -q "url = \"$CONTEXT7_URL\"" "$HOME/.codex/config.toml" 2>/dev/null; then
+          report_verification_check "PASS" "mcp/codex" "Codex config.toml contains $CONTEXT7_SERVER_NAME"
+        else
+          report_verification_check "FAIL" "mcp/codex" "Codex config.toml missing $CONTEXT7_SERVER_NAME"
         fi
         ;;
       vscode)
-        if grep -q 'mcpm_context7' "$HOME/.config/Code/User/mcp.json" 2>/dev/null; then
-          report_verification_check "PASS" "mcp/vscode" "VS Code mcp.json contains mcpm_context7"
+        if grep -q "\"$CONTEXT7_SERVER_NAME\"" "$HOME/.config/Code/User/mcp.json" 2>/dev/null && grep -q "\"url\": \"$CONTEXT7_URL\"" "$HOME/.config/Code/User/mcp.json" 2>/dev/null; then
+          report_verification_check "PASS" "mcp/vscode" "VS Code mcp.json contains $CONTEXT7_SERVER_NAME"
         else
-          report_verification_check "FAIL" "mcp/vscode" "VS Code mcp.json missing mcpm_context7"
+          report_verification_check "FAIL" "mcp/vscode" "VS Code mcp.json missing $CONTEXT7_SERVER_NAME"
         fi
         ;;
       github-copilot-cli)
         local copilot_home
         copilot_home="${COPILOT_HOME:-$HOME/.copilot}"
-        if grep -q '"mcpServers"' "$copilot_home/mcp-config.json" 2>/dev/null && grep -q 'mcpm_context7' "$copilot_home/mcp-config.json" 2>/dev/null; then
-          report_verification_check "PASS" "mcp/github-copilot-cli" "Copilot CLI mcp-config.json contains mcpm_context7"
+        if grep -q '"mcpServers"' "$copilot_home/mcp-config.json" 2>/dev/null && grep -q "\"$CONTEXT7_SERVER_NAME\"" "$copilot_home/mcp-config.json" 2>/dev/null; then
+          report_verification_check "PASS" "mcp/github-copilot-cli" "Copilot CLI mcp-config.json contains $CONTEXT7_SERVER_NAME"
         else
-          report_verification_check "FAIL" "mcp/github-copilot-cli" "Copilot CLI mcp-config.json missing mcpm_context7"
+          report_verification_check "FAIL" "mcp/github-copilot-cli" "Copilot CLI mcp-config.json missing $CONTEXT7_SERVER_NAME"
         fi
         ;;
       github-copilot)
         report_verification_check "SKIP" "mcp/github-copilot" "use the vscode target for Copilot-in-VS-Code MCP verification"
         ;;
-      *)
-        if client_name="$(mcpm_client_name "$tool" 2>/dev/null)"; then
-          if grep -Eiq "${client_name}.*${CONTEXT7_SERVER_NAME}|${tool}.*${CONTEXT7_SERVER_NAME}|${CONTEXT7_SERVER_NAME}.*${client_name}|${CONTEXT7_SERVER_NAME}.*${tool}" <<<"$mcpm_clients"; then
-            report_verification_check "PASS" "mcp/$tool" "mcpm client list shows Context7 for $client_name"
-          else
-            report_verification_check "FAIL" "mcp/$tool" "mcpm client list did not show Context7 for $client_name"
-          fi
+      cline)
+        if grep -q '"mcpServers"' "$HOME/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" 2>/dev/null && grep -q "\"$CONTEXT7_SERVER_NAME\"" "$HOME/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json" 2>/dev/null; then
+          report_verification_check "PASS" "mcp/cline" "Cline MCP settings contain $CONTEXT7_SERVER_NAME"
         else
-          report_verification_check "SKIP" "mcp/$tool" "no static MCP verification rule defined"
+          report_verification_check "FAIL" "mcp/cline" "Cline MCP settings missing $CONTEXT7_SERVER_NAME"
         fi
+        ;;
+      continue)
+        if grep -q "\"$CONTEXT7_SERVER_NAME\"" "$HOME/.continue/mcpServers/$CONTEXT7_SERVER_NAME.json" 2>/dev/null && grep -q "\"url\": \"$CONTEXT7_URL\"" "$HOME/.continue/mcpServers/$CONTEXT7_SERVER_NAME.json" 2>/dev/null; then
+          report_verification_check "PASS" "mcp/continue" "Continue MCP config contains $CONTEXT7_SERVER_NAME"
+        else
+          report_verification_check "FAIL" "mcp/continue" "Continue MCP config missing $CONTEXT7_SERVER_NAME"
+        fi
+        ;;
+      gemini-cli)
+        if grep -q '"mcpServers"' "$HOME/.gemini/settings.json" 2>/dev/null && grep -q "\"$CONTEXT7_SERVER_NAME\"" "$HOME/.gemini/settings.json" 2>/dev/null; then
+          report_verification_check "PASS" "mcp/gemini-cli" "Gemini CLI settings contain $CONTEXT7_SERVER_NAME"
+        else
+          report_verification_check "FAIL" "mcp/gemini-cli" "Gemini CLI settings missing $CONTEXT7_SERVER_NAME"
+        fi
+        ;;
+      *)
+        report_verification_check "SKIP" "mcp/$tool" "no static MCP verification rule defined"
         ;;
     esac
   done
@@ -199,13 +212,6 @@ verify_mcp_smoke() {
   fi
 
   local output
-  output="$(capture_cmd mcpm ls || true)"
-  if grep -qi "$CONTEXT7_SERVER_NAME" <<<"$output"; then
-    report_verification_check "PASS" "mcpm" "mcpm ls included $CONTEXT7_SERVER_NAME"
-  else
-    report_verification_check "FAIL" "mcpm" "mcpm ls did not include $CONTEXT7_SERVER_NAME"
-  fi
-
   local tool
   for tool in "$@"; do
     if ! tool_has_mcp_cli_check "$tool"; then
@@ -217,11 +223,11 @@ verify_mcp_smoke() {
       opencode)
         if ! has_cmd opencode; then
           report_verification_check "SKIP" "mcp-cli/opencode" "opencode executable not found"
-        elif output="$(capture_cmd opencode mcp list || true)"; then
-          if grep -q 'context7' <<<"$output"; then
-            report_verification_check "PASS" "mcp-cli/opencode" "opencode mcp list included context7"
+        elif output="$(capture_cmd opencode mcp list)"; then
+          if grep -q "$CONTEXT7_SERVER_NAME" <<<"$output"; then
+            report_verification_check "PASS" "mcp-cli/opencode" "opencode mcp list included $CONTEXT7_SERVER_NAME"
           else
-            report_verification_check "FAIL" "mcp-cli/opencode" "opencode mcp list did not include context7"
+            report_verification_check "FAIL" "mcp-cli/opencode" "opencode mcp list did not include $CONTEXT7_SERVER_NAME"
           fi
         else
           report_verification_check "FAIL" "mcp-cli/opencode" "unable to query opencode mcp list"
@@ -230,14 +236,40 @@ verify_mcp_smoke() {
       claude-code)
         if ! has_cmd claude; then
           report_verification_check "SKIP" "mcp-cli/claude-code" "claude executable not found"
-        elif output="$(capture_cmd claude mcp list || true)"; then
-          if grep -q 'context7' <<<"$output"; then
-            report_verification_check "PASS" "mcp-cli/claude-code" "claude mcp list included context7"
+        elif output="$(capture_cmd claude mcp list)"; then
+          if grep -q "$CONTEXT7_SERVER_NAME" <<<"$output"; then
+            report_verification_check "PASS" "mcp-cli/claude-code" "claude mcp list included $CONTEXT7_SERVER_NAME"
           else
-            report_verification_check "FAIL" "mcp-cli/claude-code" "claude mcp list did not include context7"
+            report_verification_check "FAIL" "mcp-cli/claude-code" "claude mcp list did not include $CONTEXT7_SERVER_NAME"
           fi
         else
           report_verification_check "FAIL" "mcp-cli/claude-code" "unable to query claude mcp list"
+        fi
+        ;;
+      codex)
+        if ! has_cmd codex; then
+          report_verification_check "SKIP" "mcp-cli/codex" "codex executable not found"
+        elif output="$(capture_cmd codex mcp list)"; then
+          if grep -q "$CONTEXT7_SERVER_NAME" <<<"$output"; then
+            report_verification_check "PASS" "mcp-cli/codex" "codex mcp list included $CONTEXT7_SERVER_NAME"
+          else
+            report_verification_check "FAIL" "mcp-cli/codex" "codex mcp list did not include $CONTEXT7_SERVER_NAME"
+          fi
+        else
+          report_verification_check "FAIL" "mcp-cli/codex" "unable to query codex mcp list"
+        fi
+        ;;
+      gemini-cli)
+        if ! has_cmd gemini; then
+          report_verification_check "SKIP" "mcp-cli/gemini-cli" "gemini executable not found"
+        elif output="$(capture_cmd gemini mcp list)"; then
+          if grep -q "$CONTEXT7_SERVER_NAME" <<<"$output"; then
+            report_verification_check "PASS" "mcp-cli/gemini-cli" "gemini mcp list included $CONTEXT7_SERVER_NAME"
+          else
+            report_verification_check "FAIL" "mcp-cli/gemini-cli" "gemini mcp list did not include $CONTEXT7_SERVER_NAME"
+          fi
+        else
+          report_verification_check "FAIL" "mcp-cli/gemini-cli" "unable to query gemini mcp list"
         fi
         ;;
     esac

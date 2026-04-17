@@ -174,6 +174,11 @@ function Validate-KnownTools([string[]]$Tools) {
 function Get-OpenCodeConfigPath { Join-Path (Get-AppDataPath) 'opencode\opencode.json' }
 function Get-VSCodeMcpPath { Join-Path (Get-AppDataPath) 'Code\User\mcp.json' }
 function Get-CopilotConfigPath { Join-Path (Join-Path (Get-HomePath) '.copilot') 'mcp-config.json' }
+function Get-ClaudeCodeConfigPath { Join-Path (Get-HomePath) '.claude.json' }
+function Get-CodexConfigPath { Join-Path (Join-Path (Get-HomePath) '.codex') 'config.toml' }
+function Get-ClineMcpPath { Join-Path (Get-AppDataPath) 'Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json' }
+function Get-ContinueMcpPath { Join-Path (Join-Path (Get-HomePath) '.continue\mcpServers') "$($script:Context7ServerName).json" }
+function Get-GeminiSettingsPath { Join-Path (Join-Path (Get-HomePath) '.gemini') 'settings.json' }
 
 function Get-ToolSkillStaticPaths([string]$Tool) {
   $userHome = Get-HomePath
@@ -192,21 +197,6 @@ function Get-ToolSkillStaticPaths([string]$Tool) {
     'roo' { return @((Join-Path $userHome ".roo\skills\$($script:SkillName)\SKILL.md")) }
     'vscode' { return @((Join-Path $userHome ".agents\skills\$($script:SkillName)\SKILL.md")) }
     default { return @() }
-  }
-}
-
-function Get-McpmClientName([string]$Tool) {
-  switch ($Tool) {
-    'claude-code' { return 'claude-code' }
-    'cursor' { return 'cursor' }
-    'windsurf' { return 'windsurf' }
-    'codex' { return 'codex-cli' }
-    'cline' { return 'cline' }
-    'continue' { return 'continue' }
-    'goose' { return 'goose-cli' }
-    'roo' { return 'roo-code' }
-    'gemini-cli' { return 'gemini-cli' }
-    default { return $null }
   }
 }
 
@@ -242,7 +232,7 @@ function Get-NativeSkillsCheckHint([string]$Tool) {
 }
 
 function Test-ToolHasMcpCliCheck([string]$Tool) {
-  return @('opencode', 'claude-code') -contains $Tool
+  return @('opencode', 'claude-code', 'codex', 'gemini-cli') -contains $Tool
 }
 
 function Detect-Tool([string]$Tool) {
@@ -436,9 +426,6 @@ function Invoke-CaptureCommandOutput {
 function Ensure-Prereqs {
   if (-not $script:Options.SkipSkills -and -not (Test-CommandExists 'npx')) {
     Fail 'npx is required'
-  }
-  if (-not $script:Options.SkipMcp -and -not (Test-CommandExists 'mcpm')) {
-    Fail 'mcpm is required. Install it first, then rerun this script.'
   }
 }
 
@@ -686,138 +673,219 @@ function Write-JsonDocument([string]$Path, $Data) {
   Set-Content -Path $Path -Value ($json + [Environment]::NewLine) -Encoding UTF8
 }
 
-function Configure-OpenCode {
-  Log 'Configuring OpenCode to use MCPM-managed Context7'
-  $path = Get-OpenCodeConfigPath
-  if ($script:Options.DryRun) {
-    Note "Would update $path"
-    return
-  }
-
-  $mcpmBin = (Get-Command 'mcpm').Source
-  Backup-FileIfPresent $path
-  $data = Read-JsoncDocument $path
-  Set-JsonPropertyValue $data '$schema' 'https://opencode.ai/config.json'
-  $mcp = Ensure-JsonObjectProperty $data 'mcp'
-  Set-JsonPropertyValue $mcp 'context7' ([pscustomobject]@{
-    type = 'local'
-    command = @($mcpmBin, 'run', 'context7')
-    enabled = $true
-  })
-  Write-JsonDocument $path $data
+function New-Context7Headers([string]$ApiKey) {
+  if ([string]::IsNullOrWhiteSpace($ApiKey)) { return $null }
+  return [ordered]@{ CONTEXT7_API_KEY = $ApiKey }
 }
 
-function Configure-VSCode {
-  Log 'Configuring VS Code MCP file'
-  $path = Get-VSCodeMcpPath
-  if ($script:Options.DryRun) {
-    Note "Would update $path"
-    return
-  }
+function Configure-JsonContext7Server([string]$Path, [string]$Mode, [string]$ApiKey) {
+  $parent = Split-Path -Parent $Path
+  if (-not [string]::IsNullOrWhiteSpace($parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+  Backup-FileIfPresent $Path
+  $headers = New-Context7Headers $ApiKey
+  $data = Read-JsoncDocument $Path
 
-  $mcpmBin = (Get-Command 'mcpm').Source
-  Backup-FileIfPresent $path
-  $data = Read-JsoncDocument $path
-  $servers = Ensure-JsonObjectProperty $data 'servers'
-  Set-JsonPropertyValue $servers 'mcpm_context7' ([pscustomobject]@{
-    type = 'stdio'
-    command = $mcpmBin
-    args = @('run', 'context7')
-  })
-  Write-JsonDocument $path $data
-}
-
-function Configure-GitHubCopilotCli {
-  Log 'Configuring GitHub Copilot CLI MCP file'
-  $path = Get-CopilotConfigPath
-  if ($script:Options.DryRun) {
-    Note "Would update $path"
-    return
-  }
-
-  $mcpmBin = (Get-Command 'mcpm').Source
-  Backup-FileIfPresent $path
-  $data = Read-JsoncDocument $path
-
-  $legacyServers = Get-JsonPropertyValue $data 'servers'
-  $mcpServers = Ensure-JsonObjectProperty $data 'mcpServers'
-  if (Test-JsonObject $legacyServers) {
-    foreach ($prop in $legacyServers.PSObject.Properties) {
-      if ($null -eq (Get-JsonPropertyValue $mcpServers $prop.Name)) {
-        Set-JsonPropertyValue $mcpServers $prop.Name $prop.Value
+  switch ($Mode) {
+    'opencode' {
+      Set-JsonPropertyValue $data '$schema' 'https://opencode.ai/config.json'
+      $mcp = Ensure-JsonObjectProperty $data 'mcp'
+      $value = [ordered]@{
+        type = 'remote'
+        url = $script:Context7Url
+        enabled = $true
       }
+      if ($null -ne $headers) { $value['headers'] = $headers }
+      Set-JsonPropertyValue $mcp $script:Context7ServerName ([pscustomobject]$value)
     }
-    if ($legacyServers -is [System.Collections.IDictionary]) {
-      foreach ($key in $legacyServers.Keys) {
-        if ($null -eq (Get-JsonPropertyValue $mcpServers $key)) {
-          Set-JsonPropertyValue $mcpServers $key $legacyServers[$key]
+    'vscode' {
+      $servers = Ensure-JsonObjectProperty $data 'servers'
+      $inputs = Get-JsonPropertyValue $data 'inputs'
+      if ($null -eq $inputs) { Set-JsonPropertyValue $data 'inputs' @() }
+      $value = [ordered]@{
+        type = 'http'
+        url = $script:Context7Url
+      }
+      if ($null -ne $headers) { $value['headers'] = $headers }
+      Set-JsonPropertyValue $servers $script:Context7ServerName ([pscustomobject]$value)
+    }
+    'copilot-cli' {
+      $legacyServers = Get-JsonPropertyValue $data 'servers'
+      $mcpServers = Ensure-JsonObjectProperty $data 'mcpServers'
+      if (Test-JsonObject $legacyServers) {
+        foreach ($prop in $legacyServers.PSObject.Properties) {
+          if ($null -eq (Get-JsonPropertyValue $mcpServers $prop.Name)) {
+            Set-JsonPropertyValue $mcpServers $prop.Name $prop.Value
+          }
         }
       }
+      $value = [ordered]@{
+        type = 'http'
+        url = $script:Context7Url
+        tools = @('*')
+      }
+      if ($null -ne $headers) { $value['headers'] = $headers }
+      Set-JsonPropertyValue $mcpServers $script:Context7ServerName ([pscustomobject]$value)
+    }
+    'claude-code' {
+      $mcpServers = Ensure-JsonObjectProperty $data 'mcpServers'
+      $value = [ordered]@{
+        type = 'http'
+        url = $script:Context7Url
+      }
+      if ($null -ne $headers) { $value['headers'] = $headers }
+      Set-JsonPropertyValue $mcpServers $script:Context7ServerName ([pscustomobject]$value)
+    }
+    'cline' {
+      $mcpServers = Ensure-JsonObjectProperty $data 'mcpServers'
+      $value = [ordered]@{
+        url = $script:Context7Url
+        disabled = $false
+      }
+      if ($null -ne $headers) { $value['headers'] = $headers }
+      Set-JsonPropertyValue $mcpServers $script:Context7ServerName ([pscustomobject]$value)
+    }
+    'continue' {
+      $server = [ordered]@{
+        type = 'http'
+        url = $script:Context7Url
+      }
+      if ($null -ne $headers) { $server['headers'] = $headers }
+      $data = [ordered]@{ mcpServers = [ordered]@{ $script:Context7ServerName = [pscustomobject]$server } }
+    }
+    'gemini' {
+      $mcpServers = Ensure-JsonObjectProperty $data 'mcpServers'
+      $value = [ordered]@{
+        httpUrl = $script:Context7Url
+        timeout = 600000
+      }
+      if ($null -ne $headers) { $value['headers'] = $headers }
+      Set-JsonPropertyValue $mcpServers $script:Context7ServerName ([pscustomobject]$value)
+    }
+    default {
+      Fail "Unsupported JSON config mode: $Mode"
     }
   }
 
-  Set-JsonPropertyValue $mcpServers 'mcpm_context7' ([pscustomobject]@{
-    type = 'local'
-    command = $mcpmBin
-    args = @('run', 'context7')
-  })
-  Write-JsonDocument $path $data
+  Write-JsonDocument $Path $data
+}
+
+function Configure-OpenCode([string]$ApiKey) {
+  Log 'Configuring OpenCode with direct Context7 MCP'
+  $path = Get-OpenCodeConfigPath
+  if ($script:Options.DryRun) { Note "Would update $path"; return }
+  Configure-JsonContext7Server -Path $path -Mode 'opencode' -ApiKey $ApiKey
+}
+
+function Configure-ClaudeCode([string]$ApiKey) {
+  Log 'Configuring Claude Code MCP settings'
+  $path = Get-ClaudeCodeConfigPath
+  if ($script:Options.DryRun) { Note "Would update $path"; return }
+  Configure-JsonContext7Server -Path $path -Mode 'claude-code' -ApiKey $ApiKey
+}
+
+function Configure-Codex([string]$ApiKey) {
+  Log 'Configuring Codex MCP settings'
+  $path = Get-CodexConfigPath
+  if ($script:Options.DryRun) { Note "Would update $path"; return }
+
+  Backup-FileIfPresent $path
+  $parent = Split-Path -Parent $path
+  if (-not [string]::IsNullOrWhiteSpace($parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+  $content = if (Test-Path $path) { Get-Content -Path $path -Raw } else { '' }
+
+  $section = @("[mcp_servers.$($script:Context7ServerName)]", "url = `"$($script:Context7Url)`"")
+  if (-not [string]::IsNullOrWhiteSpace($ApiKey)) {
+    $section += "http_headers = { CONTEXT7_API_KEY = `"$ApiKey`" }"
+  }
+  $sectionText = (($section -join [Environment]::NewLine) + [Environment]::NewLine)
+
+  $pattern = "(?ms)^\[mcp_servers\.$([regex]::Escape($script:Context7ServerName))\]\r?\n.*?(?=^\[|\z)"
+  if ($content -match $pattern) {
+    $updated = [regex]::Replace($content, $pattern, $sectionText).TrimEnd() + [Environment]::NewLine
+  } else {
+    $updated = $content.TrimEnd()
+    if (-not [string]::IsNullOrWhiteSpace($updated)) {
+      $updated += [Environment]::NewLine + [Environment]::NewLine
+    }
+    $updated += $sectionText
+  }
+
+  Set-Content -Path $path -Value $updated -Encoding UTF8
+}
+
+function Configure-VSCode([string]$ApiKey) {
+  Log 'Configuring VS Code MCP file'
+  $path = Get-VSCodeMcpPath
+  if ($script:Options.DryRun) { Note "Would update $path"; return }
+  Configure-JsonContext7Server -Path $path -Mode 'vscode' -ApiKey $ApiKey
+}
+
+function Configure-GitHubCopilotCli([string]$ApiKey) {
+  Log 'Configuring GitHub Copilot CLI MCP file'
+  $path = Get-CopilotConfigPath
+  if ($script:Options.DryRun) { Note "Would update $path"; return }
+  Configure-JsonContext7Server -Path $path -Mode 'copilot-cli' -ApiKey $ApiKey
+}
+
+function Configure-Cline([string]$ApiKey) {
+  Log 'Configuring Cline MCP settings'
+  $path = Get-ClineMcpPath
+  if ($script:Options.DryRun) { Note "Would update $path"; return }
+  Configure-JsonContext7Server -Path $path -Mode 'cline' -ApiKey $ApiKey
+}
+
+function Configure-Continue([string]$ApiKey) {
+  Log 'Configuring Continue MCP settings'
+  $path = Get-ContinueMcpPath
+  if ($script:Options.DryRun) { Note "Would update $path"; return }
+  Configure-JsonContext7Server -Path $path -Mode 'continue' -ApiKey $ApiKey
+}
+
+function Configure-GeminiCli([string]$ApiKey) {
+  Log 'Configuring Gemini CLI MCP settings'
+  $path = Get-GeminiSettingsPath
+  if ($script:Options.DryRun) { Note "Would update $path"; return }
+  Configure-JsonContext7Server -Path $path -Mode 'gemini' -ApiKey $ApiKey
 }
 
 function Install-Context7Server([string]$ApiKey) {
-  Log 'Installing Context7 in MCPM'
+  Log 'Preparing direct Context7 MCP configuration'
 
   if ($script:Options.DryRun) {
-    Note "Would ensure MCPM server '$($script:Context7ServerName)' exists"
+    Note "Would configure supported tools with a direct remote MCP entry for '$($script:Context7ServerName)'"
     if (-not [string]::IsNullOrWhiteSpace($ApiKey)) {
-      Note "Would configure MCPM server '$($script:Context7ServerName)' with a Context7 API key header"
+      Note 'Would include a Context7 API key header in supported tool configurations'
     }
     return
   }
 
-  $listResult = Invoke-CaptureCommandOutput @('mcpm', 'ls')
-  if ($listResult.Success -and $listResult.Output -match "(?im)^\s*$($script:Context7ServerName)(\s+.*)?$") {
-    Note 'Context7 already exists in MCPM'
-  } else {
-    $installed = Invoke-ExternalCommand -Command @('mcpm', 'install', $script:Context7ServerName, '--force') -IgnoreExitCode
-    if (-not $installed) {
-      Warn 'mcpm registry install failed; falling back to manual MCPM server definition'
-      [void](Invoke-ExternalCommand -Command @('mcpm', 'new', $script:Context7ServerName, '--type', 'remote', '--url', $script:Context7Url, '--force'))
-    }
-  }
-
-  if (-not [string]::IsNullOrWhiteSpace($ApiKey)) {
-    [void](Invoke-ExternalCommand -Command @('mcpm', 'edit', $script:Context7ServerName, '--url', $script:Context7Url, '--headers', ("CONTEXT7_API_KEY={0}" -f $ApiKey), '--force'))
-  }
+  Note 'No standalone MCP manager is used; supported tools are configured directly'
 }
 
-function Wire-Context7ToTool([string]$Tool) {
+function Wire-Context7ToTool([string]$Tool, [string]$ApiKey) {
   switch ($Tool) {
-    'opencode' { Configure-OpenCode; return }
-    'vscode' { Configure-VSCode; return }
-    'github-copilot-cli' { Configure-GitHubCopilotCli; return }
+    'opencode' { Configure-OpenCode $ApiKey; return }
+    'claude-code' { Configure-ClaudeCode $ApiKey; return }
+    'codex' { Configure-Codex $ApiKey; return }
+    'vscode' { Configure-VSCode $ApiKey; return }
+    'github-copilot-cli' { Configure-GitHubCopilotCli $ApiKey; return }
+    'cline' { Configure-Cline $ApiKey; return }
+    'continue' { Configure-Continue $ApiKey; return }
+    'gemini-cli' { Configure-GeminiCli $ApiKey; return }
     'github-copilot' {
       Warn "No standalone GitHub Copilot MCP file is configured here; use the 'vscode' target for Copilot-in-VS-Code MCP wiring"
       return
     }
-  }
-
-  $clientName = Get-McpmClientName $Tool
-  if ([string]::IsNullOrWhiteSpace($clientName)) {
-    Warn "No MCP wiring strategy is defined for $Tool"
-    return
-  }
-
-  Log "Adding Context7 to $Tool via MCPM client '$clientName'"
-  $success = Invoke-ExternalCommand -Command @('mcpm', 'client', 'edit', $clientName, '--add-server', $script:Context7ServerName, '--force') -IgnoreExitCode
-  if (-not $success) {
-    Warn "Failed to wire Context7 into MCPM client '$clientName' for tool '$Tool'"
+    default {
+      Warn "No direct MCP wiring strategy is defined for $Tool"
+      return
+    }
   }
 }
 
-function Wire-Context7ToTools([string[]]$Tools) {
+function Wire-Context7ToTools([string]$ApiKey, [string[]]$Tools) {
   foreach ($tool in $Tools) {
-    Wire-Context7ToTool $tool
+    Wire-Context7ToTool $tool $ApiKey
   }
 }
 
@@ -887,44 +955,59 @@ function Verify-McpStatic([string[]]$Tools) {
     return
   }
 
-  $mcpmServers = Invoke-CaptureCommandOutput @('mcpm', 'ls')
-  if ($mcpmServers.Success) {
-    if ($mcpmServers.Output -match [regex]::Escape($script:Context7ServerName)) {
-      Report-VerificationCheck 'PASS' 'mcp/global' "mcpm knows about $($script:Context7ServerName)"
-    } else {
-      Report-VerificationCheck 'FAIL' 'mcp/global' "mcpm ls did not include $($script:Context7ServerName)"
-    }
-  } else {
-    Report-VerificationCheck 'FAIL' 'mcp/global' 'unable to list MCPM servers'
-  }
-
-  $mcpmClients = Invoke-CaptureCommandOutput @('mcpm', 'client', 'ls')
+  $escapedServerName = [regex]::Escape("`"$($script:Context7ServerName)`"")
+  $escapedUrl = [regex]::Escape($script:Context7Url)
   foreach ($tool in $Tools) {
     switch ($tool) {
       'opencode' {
         $path = Get-OpenCodeConfigPath
-        if ((Test-Path $path) -and ((Get-Content -Path $path -Raw) -match '"context7"')) {
-          Report-VerificationCheck 'PASS' 'mcp/opencode' 'OpenCode config contains context7'
+        $content = if (Test-Path $path) { Get-Content -Path $path -Raw } else { $null }
+        if ($content -and ($content -match $escapedServerName) -and ($content -match '"type":\s*"remote"')) {
+          Report-VerificationCheck 'PASS' 'mcp/opencode' "OpenCode config contains a direct $($script:Context7ServerName) remote server"
         } else {
-          Report-VerificationCheck 'FAIL' 'mcp/opencode' 'OpenCode config missing context7'
+          Report-VerificationCheck 'FAIL' 'mcp/opencode' "OpenCode config missing $($script:Context7ServerName)"
+        }
+        continue
+      }
+      'claude-code' {
+        $path = Get-ClaudeCodeConfigPath
+        $content = if (Test-Path $path) { Get-Content -Path $path -Raw } else { $null }
+        if ($content -and ($content -match '"mcpServers"') -and ($content -match $escapedServerName)) {
+          Report-VerificationCheck 'PASS' 'mcp/claude-code' "Claude Code config contains $($script:Context7ServerName)"
+        } else {
+          Report-VerificationCheck 'FAIL' 'mcp/claude-code' "Claude Code config missing $($script:Context7ServerName)"
+        }
+        continue
+      }
+      'codex' {
+        $path = Get-CodexConfigPath
+        $content = if (Test-Path $path) { Get-Content -Path $path -Raw } else { $null }
+        $tomlSection = '(?m)^\[mcp_servers\.' + [regex]::Escape($script:Context7ServerName) + '\]'
+        $tomlUrl = 'url = "' + $escapedUrl + '"'
+        if ($content -and ($content -match $tomlSection) -and ($content -match $tomlUrl)) {
+          Report-VerificationCheck 'PASS' 'mcp/codex' "Codex config.toml contains $($script:Context7ServerName)"
+        } else {
+          Report-VerificationCheck 'FAIL' 'mcp/codex' "Codex config.toml missing $($script:Context7ServerName)"
         }
         continue
       }
       'vscode' {
         $path = Get-VSCodeMcpPath
-        if ((Test-Path $path) -and ((Get-Content -Path $path -Raw) -match 'mcpm_context7')) {
-          Report-VerificationCheck 'PASS' 'mcp/vscode' 'VS Code mcp.json contains mcpm_context7'
+        $content = if (Test-Path $path) { Get-Content -Path $path -Raw } else { $null }
+        if ($content -and ($content -match $escapedServerName) -and ($content -match ('"url":\s*"' + $escapedUrl + '"'))) {
+          Report-VerificationCheck 'PASS' 'mcp/vscode' "VS Code mcp.json contains $($script:Context7ServerName)"
         } else {
-          Report-VerificationCheck 'FAIL' 'mcp/vscode' 'VS Code mcp.json missing mcpm_context7'
+          Report-VerificationCheck 'FAIL' 'mcp/vscode' "VS Code mcp.json missing $($script:Context7ServerName)"
         }
         continue
       }
       'github-copilot-cli' {
         $path = Get-CopilotConfigPath
-        if ((Test-Path $path) -and ((Get-Content -Path $path -Raw) -match '"mcpServers"') -and ((Get-Content -Path $path -Raw) -match 'mcpm_context7')) {
-          Report-VerificationCheck 'PASS' 'mcp/github-copilot-cli' 'Copilot CLI mcp-config.json contains mcpm_context7'
+        $content = if (Test-Path $path) { Get-Content -Path $path -Raw } else { $null }
+        if ($content -and ($content -match '"mcpServers"') -and ($content -match $escapedServerName)) {
+          Report-VerificationCheck 'PASS' 'mcp/github-copilot-cli' "Copilot CLI mcp-config.json contains $($script:Context7ServerName)"
         } else {
-          Report-VerificationCheck 'FAIL' 'mcp/github-copilot-cli' 'Copilot CLI mcp-config.json missing mcpm_context7'
+          Report-VerificationCheck 'FAIL' 'mcp/github-copilot-cli' "Copilot CLI mcp-config.json missing $($script:Context7ServerName)"
         }
         continue
       }
@@ -932,16 +1015,39 @@ function Verify-McpStatic([string[]]$Tools) {
         Report-VerificationCheck 'SKIP' 'mcp/github-copilot' 'use the vscode target for Copilot-in-VS-Code MCP verification'
         continue
       }
+      'cline' {
+        $path = Get-ClineMcpPath
+        $content = if (Test-Path $path) { Get-Content -Path $path -Raw } else { $null }
+        if ($content -and ($content -match '"mcpServers"') -and ($content -match $escapedServerName)) {
+          Report-VerificationCheck 'PASS' 'mcp/cline' "Cline MCP settings contain $($script:Context7ServerName)"
+        } else {
+          Report-VerificationCheck 'FAIL' 'mcp/cline' "Cline MCP settings missing $($script:Context7ServerName)"
+        }
+        continue
+      }
+      'continue' {
+        $path = Get-ContinueMcpPath
+        $content = if (Test-Path $path) { Get-Content -Path $path -Raw } else { $null }
+        if ($content -and ($content -match $escapedServerName) -and ($content -match ('"url":\s*"' + $escapedUrl + '"'))) {
+          Report-VerificationCheck 'PASS' 'mcp/continue' "Continue MCP config contains $($script:Context7ServerName)"
+        } else {
+          Report-VerificationCheck 'FAIL' 'mcp/continue' "Continue MCP config missing $($script:Context7ServerName)"
+        }
+        continue
+      }
+      'gemini-cli' {
+        $path = Get-GeminiSettingsPath
+        $content = if (Test-Path $path) { Get-Content -Path $path -Raw } else { $null }
+        if ($content -and ($content -match '"mcpServers"') -and ($content -match $escapedServerName)) {
+          Report-VerificationCheck 'PASS' 'mcp/gemini-cli' "Gemini CLI settings contain $($script:Context7ServerName)"
+        } else {
+          Report-VerificationCheck 'FAIL' 'mcp/gemini-cli' "Gemini CLI settings missing $($script:Context7ServerName)"
+        }
+        continue
+      }
     }
 
-    $clientName = Get-McpmClientName $tool
-    if ([string]::IsNullOrWhiteSpace($clientName)) {
-      Report-VerificationCheck 'SKIP' "mcp/$tool" 'no static MCP verification rule defined'
-    } elseif ($mcpmClients.Output -match [regex]::Escape($clientName) -and $mcpmClients.Output -match [regex]::Escape($script:Context7ServerName)) {
-      Report-VerificationCheck 'PASS' "mcp/$tool" "mcpm client list shows Context7 for $clientName"
-    } else {
-      Report-VerificationCheck 'FAIL' "mcp/$tool" "mcpm client list did not show Context7 for $clientName"
-    }
+    Report-VerificationCheck 'SKIP' "mcp/$tool" 'no static MCP verification rule defined'
   }
 }
 
@@ -986,29 +1092,23 @@ function Verify-McpSmoke([string[]]$Tools) {
     return
   }
 
-  $mcpm = Invoke-CaptureCommandOutput @('mcpm', 'ls')
-  if ($mcpm.Output -match [regex]::Escape($script:Context7ServerName)) {
-    Report-VerificationCheck 'PASS' 'mcpm' "mcpm ls included $($script:Context7ServerName)"
-  } else {
-    Report-VerificationCheck 'FAIL' 'mcpm' "mcpm ls did not include $($script:Context7ServerName)"
-  }
-
   foreach ($tool in $Tools) {
     if (-not (Test-ToolHasMcpCliCheck $tool)) {
       Report-VerificationCheck 'SKIP' "mcp-cli/$tool" 'no documented CLI check found'
       continue
     }
 
+    $escapedName = [regex]::Escape($script:Context7ServerName)
     switch ($tool) {
       'opencode' {
         if (-not (Test-CommandExists 'opencode')) {
           Report-VerificationCheck 'SKIP' 'mcp-cli/opencode' 'opencode executable not found'
         } else {
           $result = Invoke-CaptureCommandOutput @('opencode', 'mcp', 'list')
-          if ($result.Success -and $result.Output -match 'context7') {
-            Report-VerificationCheck 'PASS' 'mcp-cli/opencode' 'opencode mcp list included context7'
+          if ($result.Success -and $result.Output -match $escapedName) {
+            Report-VerificationCheck 'PASS' 'mcp-cli/opencode' "opencode mcp list included $($script:Context7ServerName)"
           } elseif ($result.Success) {
-            Report-VerificationCheck 'FAIL' 'mcp-cli/opencode' 'opencode mcp list did not include context7'
+            Report-VerificationCheck 'FAIL' 'mcp-cli/opencode' "opencode mcp list did not include $($script:Context7ServerName)"
           } else {
             Report-VerificationCheck 'FAIL' 'mcp-cli/opencode' 'unable to query opencode mcp list'
           }
@@ -1019,12 +1119,40 @@ function Verify-McpSmoke([string[]]$Tools) {
           Report-VerificationCheck 'SKIP' 'mcp-cli/claude-code' 'claude executable not found'
         } else {
           $result = Invoke-CaptureCommandOutput @('claude', 'mcp', 'list')
-          if ($result.Success -and $result.Output -match 'context7') {
-            Report-VerificationCheck 'PASS' 'mcp-cli/claude-code' 'claude mcp list included context7'
+          if ($result.Success -and $result.Output -match $escapedName) {
+            Report-VerificationCheck 'PASS' 'mcp-cli/claude-code' "claude mcp list included $($script:Context7ServerName)"
           } elseif ($result.Success) {
-            Report-VerificationCheck 'FAIL' 'mcp-cli/claude-code' 'claude mcp list did not include context7'
+            Report-VerificationCheck 'FAIL' 'mcp-cli/claude-code' "claude mcp list did not include $($script:Context7ServerName)"
           } else {
             Report-VerificationCheck 'FAIL' 'mcp-cli/claude-code' 'unable to query claude mcp list'
+          }
+        }
+      }
+      'codex' {
+        if (-not (Test-CommandExists 'codex')) {
+          Report-VerificationCheck 'SKIP' 'mcp-cli/codex' 'codex executable not found'
+        } else {
+          $result = Invoke-CaptureCommandOutput @('codex', 'mcp', 'list')
+          if ($result.Success -and $result.Output -match $escapedName) {
+            Report-VerificationCheck 'PASS' 'mcp-cli/codex' "codex mcp list included $($script:Context7ServerName)"
+          } elseif ($result.Success) {
+            Report-VerificationCheck 'FAIL' 'mcp-cli/codex' "codex mcp list did not include $($script:Context7ServerName)"
+          } else {
+            Report-VerificationCheck 'FAIL' 'mcp-cli/codex' 'unable to query codex mcp list'
+          }
+        }
+      }
+      'gemini-cli' {
+        if (-not (Test-CommandExists 'gemini')) {
+          Report-VerificationCheck 'SKIP' 'mcp-cli/gemini-cli' 'gemini executable not found'
+        } else {
+          $result = Invoke-CaptureCommandOutput @('gemini', 'mcp', 'list')
+          if ($result.Success -and $result.Output -match $escapedName) {
+            Report-VerificationCheck 'PASS' 'mcp-cli/gemini-cli' "gemini mcp list included $($script:Context7ServerName)"
+          } elseif ($result.Success) {
+            Report-VerificationCheck 'FAIL' 'mcp-cli/gemini-cli' "gemini mcp list did not include $($script:Context7ServerName)"
+          } else {
+            Report-VerificationCheck 'FAIL' 'mcp-cli/gemini-cli' 'unable to query gemini mcp list'
           }
         }
       }
@@ -1046,121 +1174,132 @@ function Run-Verification([string[]]$SelectedTools) {
   }
 }
 
+function Write-MviHeader([string]$Tool) {
+  Note ''
+  Note '  ─────────────────────────────'
+  Note "  $Tool"
+  Note '  ─────────────────────────────'
+}
+
 function Print-ManualVerificationInstructions([string[]]$Tools) {
   Log 'Manual verification instructions'
+  $skillResponse = 'I greet you from the world of skills, user! You shall use me skillfully.'
   foreach ($tool in $Tools) {
     switch ($tool) {
-      'github-copilot-cli' {
-        Note @"
-- github-copilot-cli:
-  1. Start Copilot CLI by running: copilot
-  2. Run: /skills list
-  3. Run: /mcp and confirm context7 is configured.
-  4. Invoke /test-skill or ask Copilot to use context7 in a prompt.
-"@
-      }
-      'vscode' {
-        Note @"
-- vscode:
-  1. Open VS Code in the target workspace.
-  2. Open Command Palette (Ctrl+Shift+P) and run: MCP: List Servers.
-  3. Open Copilot Chat in Agent mode and inspect the tools list.
-  4. If context7 is present but unavailable, open the VS Code user mcp.json file and verify the command path.
-"@
-      }
-      'github-copilot' {
-        Note @"
-- github-copilot:
-  1. Verify the skill exists in ~/.agents/skills, ~/.claude/skills, or ~/.copilot/skills.
-  2. In Copilot CLI, run: /skills list
-  3. In VS Code Agent mode, type /skills and confirm the skill appears.
-  4. For MCP in VS Code, also select the 'vscode' target and run MCP: List Servers.
-"@
-      }
-      'cline' {
-        Note @"
-- cline:
-  1. Verify the skill exists in ~/.agents/skills/$($script:SkillName)/SKILL.md.
-  2. Inspect the Cline MCP settings file in VS Code global storage.
-  3. Open Cline and run a prompt that explicitly says to use context7.
-  4. Run another prompt that explicitly invokes or depends on the installed skill.
-"@
-      }
       'claude-code' {
-        Note @"
-- claude-code:
-  1. Run: claude mcp list
-  2. Inside Claude Code, run: /mcp
-  3. Invoke /test-skill or ask: What skills are available?
-"@
+        Write-MviHeader $tool
+        Note "  1. Open Claude Code."
+        Note "  2. Run in chat: /mcp"
+        Note "     Confirm $($script:Context7ServerName) is connected."
+        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
       }
       'opencode' {
-        Note @"
-- opencode:
-  1. Run: opencode mcp list
-  2. Optionally run: opencode mcp debug context7
-  3. Open an OpenCode session and inspect the available skills / invoke the installed skill in a task.
-"@
+        Write-MviHeader $tool
+        Note "  1. Open OpenCode."
+        Note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
+        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
       }
       'codex' {
-        Note @"
-- codex:
-  1. Open Codex CLI or TUI.
-  2. Run /mcp in the TUI, or inspect the Codex config file for the configured server.
-  3. Run /skills and confirm the skill is listed.
-  4. Invoke the skill explicitly with the Codex skill picker or prompt.
-"@
-      }
-      'cursor' {
-        Note @"
-- cursor:
-  1. Inspect the tool's MCP/skills settings UI or config file.
-  2. Confirm the test skill folder and Context7 server entry are present.
-  3. Run one prompt that explicitly asks the tool to use context7 and another that invokes the installed skill.
-"@
-      }
-      'windsurf' {
-        Note @"
-- windsurf:
-  1. Inspect the tool's MCP/skills settings UI or config file.
-  2. Confirm the test skill folder and Context7 server entry are present.
-  3. Run one prompt that explicitly asks the tool to use context7 and another that invokes the installed skill.
-"@
-      }
-      'continue' {
-        Note @"
-- continue:
-  1. Inspect the tool's MCP/skills settings UI or config file.
-  2. Confirm the test skill folder and Context7 server entry are present.
-  3. Run one prompt that explicitly asks the tool to use context7 and another that invokes the installed skill.
-"@
-      }
-      'goose' {
-        Note @"
-- goose:
-  1. Inspect the tool's MCP/skills settings UI or config file.
-  2. Confirm the test skill folder and Context7 server entry are present.
-  3. Run one prompt that explicitly asks the tool to use context7 and another that invokes the installed skill.
-"@
-      }
-      'roo' {
-        Note @"
-- roo:
-  1. Inspect the tool's MCP/skills settings UI or config file.
-  2. Confirm the test skill folder and Context7 server entry are present.
-  3. Run one prompt that explicitly asks the tool to use context7 and another that invokes the installed skill.
-"@
+        Write-MviHeader $tool
+        Note "  1. Open Codex."
+        Note "  2. Run in chat: /mcp"
+        Note "     Confirm $($script:Context7ServerName) is connected."
+        Note "  3. Run in chat: /skills"
+        Note "     Confirm $($script:SkillName) is listed."
+        Note "  4. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
       }
       'gemini-cli' {
-        Note @"
-- gemini-cli:
-  1. Inspect the tool's MCP/skills settings UI or config file.
-  2. Confirm the test skill folder and Context7 server entry are present.
-  3. Run one prompt that explicitly asks the tool to use context7 and another that invokes the installed skill.
-"@
+        Write-MviHeader $tool
+        Note "  1. Open Gemini CLI."
+        Note "  2. Run in chat: /mcp"
+        Note "     Confirm $($script:Context7ServerName) is connected."
+        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
+      }
+      'github-copilot-cli' {
+        Write-MviHeader $tool
+        Note "  1. Open GitHub Copilot CLI."
+        Note "  2. Run in chat: /mcp"
+        Note "     Confirm $($script:Context7ServerName) is listed."
+        Note "  3. Run in chat: /skills list"
+        Note "     Confirm $($script:SkillName) is listed."
+        Note "  4. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
+      }
+      'vscode' {
+        Write-MviHeader $tool
+        Note "  1. Open VS Code."
+        Note "  2. Open Command Palette (Ctrl+Shift+P) -> MCP: List Servers."
+        Note "     Confirm $($script:Context7ServerName) is listed."
+        Note "  3. Open Copilot Chat in Agent mode."
+        Note "     Confirm skill tools appear in the tools panel."
+        Note "  4. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
+      }
+      'github-copilot' {
+        Write-MviHeader $tool
+        Note "  1. Open VS Code."
+        Note "  2. Open Command Palette (Ctrl+Shift+P) -> MCP: List Servers."
+        Note "     (MCP is wired via the vscode target)"
+        Note "     Confirm $($script:Context7ServerName) is listed."
+        Note "  3. Open Copilot Chat in Agent mode."
+        Note "     Confirm skill tools appear in the tools panel."
+        Note "  4. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
+      }
+      'cline' {
+        Write-MviHeader $tool
+        Note "  1. Open Cline."
+        Note "  2. Open MCP Servers panel."
+        Note "     Confirm $($script:Context7ServerName) is listed and connected."
+        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
+      }
+      'cursor' {
+        Write-MviHeader $tool
+        Note "  1. Open Cursor."
+        Note "  2. Open Settings -> MCP."
+        Note "     Confirm $($script:Context7ServerName) is listed."
+        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
+      }
+      'windsurf' {
+        Write-MviHeader $tool
+        Note "  1. Open Windsurf."
+        Note "  2. Open Cascade -> MCP panel."
+        Note "     Confirm $($script:Context7ServerName) is listed."
+        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
+      }
+      'roo' {
+        Write-MviHeader $tool
+        Note "  1. Open VS Code with Roo."
+        Note "  2. Open MCP Servers panel."
+        Note "     Confirm $($script:Context7ServerName) is listed and connected."
+        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
+      }
+      'continue' {
+        Write-MviHeader $tool
+        Note "  1. Open VS Code with Continue."
+        Note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
+        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
+      }
+      'goose' {
+        Write-MviHeader $tool
+        Note "  1. Open Goose."
+        Note "  2. Prompt in chat: Use context7 to look up ABP.io caching strategies."
+        Note "  3. Prompt in chat: Run the $($script:SkillName) skill."
+        Note "     Expected: `"$skillResponse`""
       }
     }
   }
+  Note ''
+  Note '  ─────────────────────────────'
 }
 
 function Select-Tools {
@@ -1284,7 +1423,7 @@ function Main([string[]]$CliArgs) {
   if (-not $script:Options.SkipMcp) {
     Phase 3 5 'Installing and wiring MCP'
     Install-Context7Server $apiKey
-    Wire-Context7ToTools $validatedTools
+    Wire-Context7ToTools $apiKey $validatedTools
   } else {
     Log 'Skipping MCP installation'
   }

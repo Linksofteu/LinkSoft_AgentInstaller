@@ -264,7 +264,7 @@ main() {
   if (( SKIP_MCP == 0 )); then
     phase 3 5 "Installing and wiring MCP"
     install_context7_server "$api_key"
-    wire_context7_to_tools "${validated_tools[@]}"
+    wire_context7_to_tools "$api_key" "${validated_tools[@]}"
   else
     log "Skipping MCP installation"
   fi
