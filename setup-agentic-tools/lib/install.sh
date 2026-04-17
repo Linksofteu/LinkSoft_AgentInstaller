@@ -456,8 +456,8 @@ def strip_jsonc(text: str) -> str:
 path = os.path.expanduser(os.environ["TARGET_PATH"])
 server_name = os.environ["FIGMA_SERVER_NAME"]
 url = os.environ["FIGMA_URL"]
-client_id = os.environ["FIGMA_CLIENT_ID"]
-client_secret = os.environ["FIGMA_CLIENT_SECRET"]
+client_id = os.environ.get("FIGMA_CLIENT_ID", "")
+client_secret = os.environ.get("FIGMA_CLIENT_SECRET", "")
 
 parent = os.path.dirname(path)
 if parent:
@@ -473,15 +473,21 @@ if os.path.exists(path):
 
 data.setdefault("$schema", "https://opencode.ai/config.json")
 data.setdefault("mcp", {})
-data["mcp"][server_name] = {
+server = {
     "enabled": True,
     "type": "remote",
     "url": url,
-    "oauth": {
-        "clientId": client_id,
-        "clientSecret": client_secret,
-    },
 }
+
+if client_id or client_secret:
+    oauth = {}
+    if client_id:
+        oauth["clientId"] = client_id
+    if client_secret:
+        oauth["clientSecret"] = client_secret
+    server["oauth"] = oauth
+
+data["mcp"][server_name] = server
 
 with open(path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
@@ -497,11 +503,35 @@ register_figma_opencode_oauth_client() {
 
   response="$(capture_cmd curl -fsS -X POST "$FIGMA_REGISTER_URL" -H "Content-Type: application/json" -d "$payload")" || die "Failed to register Figma OAuth client for OpenCode"
 
-  client_id="$(printf '%s' "$response" | sed -n 's/.*"client_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-  client_secret="$(printf '%s' "$response" | sed -n 's/.*"client_secret"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  client_id="$(RESPONSE_JSON="$response" python3 - <<'PY'
+import json
+import os
 
-  [[ -n "$client_id" ]] || die "Figma OAuth registration response did not include client_id"
-  [[ -n "$client_secret" ]] || die "Figma OAuth registration response did not include client_secret"
+raw = os.environ.get("RESPONSE_JSON", "")
+try:
+    data = json.loads(raw)
+except Exception:
+    print("")
+else:
+    print(data.get("client_id", ""))
+PY
+)"
+  client_secret="$(RESPONSE_JSON="$response" python3 - <<'PY'
+import json
+import os
+
+raw = os.environ.get("RESPONSE_JSON", "")
+try:
+    data = json.loads(raw)
+except Exception:
+    print("")
+else:
+    print(data.get("client_secret", ""))
+PY
+)"
+
+  [[ -n "$client_id" ]] || die "Figma OAuth registration response did not include client_id. Raw response: $response"
+  [[ -n "$client_secret" ]] || die "Figma OAuth registration response did not include client_secret. Raw response: $response"
 
   FIGMA_CLIENT_ID_INPUT="$client_id"
   FIGMA_CLIENT_SECRET_INPUT="$client_secret"
@@ -536,9 +566,55 @@ configure_figma_opencode() {
   write_figma_opencode_json_config "~/.config/opencode/opencode.json" "$client_id" "$client_secret" || die "Failed to configure OpenCode for Figma MCP"
 }
 
+clear_figma_opencode_auth_cache() {
+  ensure_install_globals
+
+  if (( DRY_RUN )); then
+    note "Would remove the '$FIGMA_SERVER_NAME' entry from ~/.local/share/opencode/mcp-auth.json if present"
+    return 0
+  fi
+
+  TARGET_PATH="~/.local/share/opencode/mcp-auth.json" FIGMA_SERVER_NAME="$FIGMA_SERVER_NAME" python3 - <<'PY'
+import json
+import os
+import shutil
+import time
+
+path = os.path.expanduser(os.environ["TARGET_PATH"])
+server_name = os.environ["FIGMA_SERVER_NAME"]
+
+if not os.path.exists(path):
+    raise SystemExit(0)
+
+with open(path, "r", encoding="utf-8") as f:
+    raw = f.read().strip()
+
+if not raw:
+    raise SystemExit(0)
+
+try:
+    data = json.loads(raw)
+except Exception:
+    raise SystemExit(0)
+
+if not isinstance(data, dict) or server_name not in data:
+    raise SystemExit(0)
+
+shutil.copy2(path, f"{path}.bak.{time.time_ns()}")
+del data[server_name]
+
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+
+  note "Cleared any cached OpenCode auth state for '$FIGMA_SERVER_NAME'"
+}
+
 authenticate_figma_opencode() {
   ensure_install_globals
   if (( DRY_RUN )); then
+    note "Would clear cached OpenCode auth state for '$FIGMA_SERVER_NAME'"
     note "Would run: opencode mcp auth $FIGMA_SERVER_NAME"
     return 0
   fi
@@ -548,8 +624,9 @@ authenticate_figma_opencode() {
     return 0
   fi
 
+  clear_figma_opencode_auth_cache
   capture_cmd opencode mcp logout "$FIGMA_SERVER_NAME" >/dev/null || true
-  note "Starting native OpenCode OAuth login for Figma; your browser may open for consent"
+  note "Starting OpenCode OAuth login for Figma using pre-registered client credentials; your browser may open for consent"
   run_cmd opencode mcp auth "$FIGMA_SERVER_NAME"
 }
 

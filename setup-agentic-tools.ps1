@@ -879,15 +879,20 @@ function Configure-OpenCodeFigma([string]$ClientId, [string]$ClientSecret) {
   $data = Read-JsoncDocument $path
   Set-JsonPropertyValue $data '$schema' 'https://opencode.ai/config.json'
   $mcp = Ensure-JsonObjectProperty $data 'mcp'
-  $oauth = [ordered]@{
-    clientId = $ClientId
-    clientSecret = $ClientSecret
-  }
   $value = [ordered]@{
     enabled = $true
     type = 'remote'
     url = $script:FigmaUrl
-    oauth = [pscustomobject]$oauth
+  }
+  if (-not [string]::IsNullOrWhiteSpace($ClientId) -or -not [string]::IsNullOrWhiteSpace($ClientSecret)) {
+    $oauth = [ordered]@{}
+    if (-not [string]::IsNullOrWhiteSpace($ClientId)) {
+      $oauth.clientId = $ClientId
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ClientSecret)) {
+      $oauth.clientSecret = $ClientSecret
+    }
+    $value.oauth = [pscustomobject]$oauth
   }
   Set-JsonPropertyValue $mcp $script:FigmaServerName ([pscustomobject]$value)
   Write-JsonDocument $path $data
@@ -908,13 +913,19 @@ function Register-FigmaOpenCodeClient {
   }
 
   try {
-    $response = Invoke-RestMethod -Method Post -Uri $script:FigmaRegisterUrl -ContentType 'application/json' -Body $body
+    $rawResponse = Invoke-WebRequest -Method Post -Uri $script:FigmaRegisterUrl -ContentType 'application/json' -Body $body
   } catch {
     Fail "Failed to register Figma OAuth client for OpenCode: $($_.Exception.Message)"
   }
 
+  try {
+    $response = $rawResponse.Content | ConvertFrom-Json
+  } catch {
+    Fail "Failed to parse Figma OAuth registration response for OpenCode: $($_.Exception.Message). Raw response: $($rawResponse.Content)"
+  }
+
   if ([string]::IsNullOrWhiteSpace($response.client_id) -or [string]::IsNullOrWhiteSpace($response.client_secret)) {
-    Fail 'Figma OAuth registration response did not include client_id and client_secret'
+    Fail "Figma OAuth registration response did not include client_id and client_secret. Raw response: $($rawResponse.Content)"
   }
 
   $script:Options.FigmaClientId = $response.client_id
@@ -929,8 +940,36 @@ function Ensure-FigmaOpenCodeCredentials {
   Register-FigmaOpenCodeClient
 }
 
+function Clear-OpenCodeFigmaAuthCache {
+  if ($script:Options.DryRun) {
+    Note "Would remove the '$($script:FigmaServerName)' entry from ~/.local/share/opencode/mcp-auth.json if present"
+    return
+  }
+
+  $path = Join-Path $HOME '.local/share/opencode/mcp-auth.json'
+  if (-not (Test-Path -LiteralPath $path)) {
+    return
+  }
+
+  try {
+    $data = Read-JsonDocument $path
+  } catch {
+    return
+  }
+
+  if ($null -eq $data -or $null -eq ($data.PSObject.Properties[$script:FigmaServerName])) {
+    return
+  }
+
+  Backup-FileIfPresent $path
+  $data.PSObject.Properties.Remove($script:FigmaServerName)
+  Write-JsonDocument $path $data
+  Note "Cleared any cached OpenCode auth state for '$($script:FigmaServerName)'"
+}
+
 function Invoke-OpenCodeFigmaAuth {
   if ($script:Options.DryRun) {
+    Note "Would clear cached OpenCode auth state for '$($script:FigmaServerName)'"
     Note "Would run: opencode mcp auth $($script:FigmaServerName)"
     return
   }
@@ -940,8 +979,9 @@ function Invoke-OpenCodeFigmaAuth {
     return
   }
 
+  Clear-OpenCodeFigmaAuthCache
   [void](Invoke-ExternalCommand -Command @('opencode', 'mcp', 'logout', $script:FigmaServerName) -IgnoreExitCode)
-  Note 'Starting native OpenCode OAuth login for Figma; your browser may open for consent'
+  Note 'Starting OpenCode OAuth login for Figma using pre-registered client credentials; your browser may open for consent'
   [void](Invoke-ExternalCommand -Command @('opencode', 'mcp', 'auth', $script:FigmaServerName))
 }
 
